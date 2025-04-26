@@ -1,49 +1,71 @@
-const User = require("../models/User");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
-const crypto = require("crypto");
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { createUser, findUserByUsername } = require('../models/userModel');
 
-
-
-const authController = {
-  async register(req, res) {
-    const { username, email, password, roleId } = req.body;
+const register = async (req, res) => {
     try {
-      const existingUser = await User.findUserByEmail(email);
-      if (existingUser)
-        return res.status(400).json({ error: "Email already in use" });
+        const { username, password, email, phone, first_name, last_name } = req.body;
 
-      const newUser = await User.createUser(username, email, password, roleId);
-      res
-        .status(201)
-        .json({ message: "User registered successfully", user: newUser });
-    } catch (error) {
-      res.status(500).json({ error: "Registration failed" });
+        const existingUser = await findUserByUsername(username);
+        if (existingUser) {
+            return res.status(400).json({ message: 'Username already exists' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 12);
+        const user = await createUser({ username, password: hashedPassword, email, phone, first_name, last_name });
+
+        res.status(201).json({ message: 'User created', user });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error' });
     }
-  },
-
-  async login(req, res) {
-    const { email, password } = req.body;
-    try {
-      const user = await User.findUserByEmail(email);
-      if (!user)
-        return res.status(400).json({ error: "Invalid email or password" });
-
-      const passwordMatch = await bcrypt.compare(password, user.password_hash);
-      if (!passwordMatch)
-        return res.status(400).json({ error: "Invalid email or password" });
-
-      const token = jwt.sign(
-        { userId: user.user_id, roleId: user.role_id },
-        process.env.JWT_SECRET,
-        { expiresIn: "1h" }
-      );
-      res.status(200).json({ message: "Login successful", token });
-    } catch (error) {
-      res.status(500).json({ error: "Login failed" });
-    }
-  },
-  
 };
 
-module.exports = authController;
+const login = async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        const user = await findUserByUsername(username);
+        if (!user) {
+            return res.status(400).json({ message: 'Invalid credentials' });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Invalid credentials' });
+        }
+
+        const payload = {
+            userId: user.user_id,
+            role: user.role_level_id, // Later we can use for role-based protection
+        };
+
+        const token = jwt.sign(payload, process.env.JWT_SECRET, {
+            expiresIn: process.env.JWT_EXPIRES_IN,
+        });
+
+        res.status(200).json({
+            message: 'Login successful',
+            token,
+            user: {
+                user_id: user.user_id,
+                username: user.username,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                biography: user.biography,
+                profile_picture: user.profile_picture,
+                role_level_id: user.role_level_id,
+                store_credit: user.store_credit,
+                created_at: user.created_at,
+            }
+        });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+module.exports = {
+    register,
+    login,
+};
