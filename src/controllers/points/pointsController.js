@@ -1,4 +1,4 @@
-const { updateUserPointsAndRole } = require('../services/loyaltyService');
+const { updateUserPointsAndRole } = require('../../services/loyalty/loyaltyService');
 
 // Temporary endpoint to manually give points to user
 const manualAddPoints = async (req, res) => {

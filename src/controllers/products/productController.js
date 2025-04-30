@@ -1,5 +1,5 @@
-const pool = require('../config/db');
-const { getAllProducts, getProductById, createProduct } = require('../models/productModel');
+const pool = require('../../config/db');
+const { getAllProducts, getProductById, createProduct } = require('../../models/productModel');
 const { validationResult } = require('express-validator');
 
 // Fetch all products

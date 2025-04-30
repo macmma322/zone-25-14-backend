@@ -1,6 +1,13 @@
-const pool = require('../config/db');
+const pool = require("../../config/db");
+const { isUserSubscribed } = require("../subscriptions/subscriptionService");
 
-// Earn points and auto-promote role if needed
+// 📈 Calculate user's point multiplier (1x or 1.5x if subscribed)
+const getPointsMultiplier = async (userId) => {
+  const subscribed = await isUserSubscribed(userId);
+  return subscribed ? 1.5 : 1;
+};
+
+// 🚀 Earn points and auto-promote role if needed
 const updateUserPointsAndRole = async (userId, earnedPoints) => {
   try {
     // 1. Update user points
@@ -10,7 +17,10 @@ const updateUserPointsAndRole = async (userId, earnedPoints) => {
       WHERE user_id = $2
       RETURNING points;
     `;
-    const { rows } = await pool.query(updatePointsQuery, [earnedPoints, userId]);
+    const { rows } = await pool.query(updatePointsQuery, [
+      earnedPoints,
+      userId,
+    ]);
     const newTotalPoints = rows[0].points;
 
     // 2. Find best matching role based on new points
@@ -25,11 +35,11 @@ const updateUserPointsAndRole = async (userId, earnedPoints) => {
     const bestRole = roleResult.rows[0];
 
     if (!bestRole) {
-      console.log('No eligible role found.');
+      console.log("No eligible role found.");
       return;
     }
 
-    // 3. Check if user already has the role
+    // 3. Check current role
     const currentRoleQuery = `
       SELECT role_level_id
       FROM users
@@ -48,14 +58,14 @@ const updateUserPointsAndRole = async (userId, earnedPoints) => {
       await pool.query(promoteQuery, [bestRole.role_level_id, userId]);
       console.log(`✅ User promoted to ${bestRole.role_name}!`);
     } else {
-      console.log('No promotion needed.');
+      console.log("No promotion needed.");
     }
-
   } catch (err) {
-    console.error('Leveling Error:', err.message);
+    console.error("Leveling Error:", err.message);
   }
 };
 
 module.exports = {
   updateUserPointsAndRole,
+  getPointsMultiplier,
 };

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const productController = require('../controllers/productController');
-const { adminProtect } = require('../middleware/adminMiddleware');
+const productController = require('../../controllers/products/productController');
+const { adminProtect } = require('../../middleware/adminMiddleware');
 
 // Public
 router.get('/products', productController.fetchAllProducts);
