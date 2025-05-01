@@ -1,3 +1,4 @@
+// File: src/routes/points/pointsRoutes.js
 const express = require('express');
 const { manualAddPoints } = require('../../controllers/points/pointsController');
 const { adminProtect } = require('../../middleware/adminMiddleware');

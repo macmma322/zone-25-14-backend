@@ -9,12 +9,15 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 
-// ▪️ Middleware
-app.use(express.json());
-if (process.env.NODE_ENV === "production") {
-  app.use(cors()); // only in prod
-}
-app.use(helmet());
+// 🔥 Must come BEFORE any routes
+app.use(express.json()); // ✅ Allows parsing JSON bodies
+
+const corsOptions = {
+  origin: "http://localhost:3000", // your frontend port
+  credentials: true, // if you use cookies later
+};
+
+app.use(cors(corsOptions)); // ✅ Always active
 
 // ▪️ Rate Limiting
 const limiter = rateLimit({
@@ -29,10 +32,9 @@ const usersRoutes = require("./src/routes/users/usersRoutes");
 const productRoutes = require("./src/routes/products/productRoutes");
 const pointsRoutes = require("./src/routes/points/pointsRoutes");
 const orderRoutes = require("./src/routes/orders/orderRoutes");
-const cartRoutes = require('./src/routes/cart/cartRoutes');
-const wishlistRoutes = require('./src/routes/wishlist/wishlistRoutes');
-const subscriptionRoutes = require('./src/routes/subscriptions/subscriptionRoutes');
-
+const cartRoutes = require("./src/routes/cart/cartRoutes");
+const wishlistRoutes = require("./src/routes/wishlist/wishlistRoutes");
+const subscriptionRoutes = require("./src/routes/subscriptions/subscriptionRoutes");
 
 // ▪️ Mount Routes
 app.use("/api/auth", authRoutes);
@@ -40,10 +42,9 @@ app.use("/api/users", usersRoutes);
 app.use("/api/points", pointsRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api", productRoutes); // 🛠️ IMPORTANT: Mount productRoutes under '/api', NOT '/api/products'
-app.use('/api', cartRoutes);
-app.use('/api', wishlistRoutes);
-app.use('/api', subscriptionRoutes);
-
+app.use("/api", cartRoutes);
+app.use("/api", wishlistRoutes);
+app.use("/api", subscriptionRoutes);
 
 // ▪️ Root Endpoint (Optional: simple welcome message)
 app.get("/", (req, res) => {

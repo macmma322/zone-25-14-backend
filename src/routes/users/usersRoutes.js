@@ -1,8 +1,10 @@
+// File: src/routes/users/usersRoutes.js
 const express = require("express");
 const router = express.Router();
 const userController = require("../../controllers/users/usersController.js");
 const { protectRoute } = require("../../middleware/authMiddleware");
 const upload = require("../../middleware/uploadMiddleware");
+const privacyRoutes = require('./userPrivacyRoutes');
 
 // ✅ Get full profile overview
 router.get("/profile", protectRoute, userController.getProfileOverview);
@@ -28,5 +30,7 @@ router.patch(
   protectRoute,
   userController.updateUserPreferences
 );
+
+router.use('/privacy', privacyRoutes);
 
 module.exports = router;

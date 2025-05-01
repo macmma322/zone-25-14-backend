@@ -1,3 +1,4 @@
+//File: src/routes/wishlist/wishlistRoutes.js
 const express = require('express');
 const router = express.Router();
 const wishlistController = require('../../controllers/wishlist/wishlistController');

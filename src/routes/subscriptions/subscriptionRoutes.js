@@ -1,3 +1,4 @@
+// File: src/routes/subscriptions/subscriptionRoutes.js
 const express = require("express");
 const router = express.Router();
 const subscriptionController = require("../../controllers/subscriptions/subscriptionController");
