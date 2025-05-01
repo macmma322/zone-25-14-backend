@@ -71,8 +71,6 @@ const login = async (req, res) => {
         created_at: user.created_at,
       },
     });
-    // ✅ Now it's safe
-    console.log("🔍 Decrypted Email:", user.email);
   } catch (err) {
     console.error(err.message);
     res.status(500).json({ message: "Server error" });

@@ -1,6 +1,5 @@
 // index.js
 require("dotenv").config({ path: "./src/.env" });
-
 const express = require("express");
 const pool = require("./src/config/db.js");
 const cors = require("cors");
@@ -35,6 +34,7 @@ const orderRoutes = require("./src/routes/orders/orderRoutes");
 const cartRoutes = require("./src/routes/cart/cartRoutes");
 const wishlistRoutes = require("./src/routes/wishlist/wishlistRoutes");
 const subscriptionRoutes = require("./src/routes/subscriptions/subscriptionRoutes");
+const rolesRoutes = require("./src/routes/roles/rolesRoutes");
 
 // ▪️ Mount Routes
 app.use("/api/auth", authRoutes);
@@ -45,6 +45,7 @@ app.use("/api", productRoutes); // 🛠️ IMPORTANT: Mount productRoutes under 
 app.use("/api", cartRoutes);
 app.use("/api", wishlistRoutes);
 app.use("/api", subscriptionRoutes);
+app.use("/api/roles", rolesRoutes);
 
 // ▪️ Root Endpoint (Optional: simple welcome message)
 app.get("/", (req, res) => {

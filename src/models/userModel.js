@@ -1,5 +1,6 @@
 // src/models/userModel.js
 const pool = require("../config/db");
+const encryptionKey = process.env.ENCRYPTION_SECRET;
 
 // Helper to get default Explorer role_level_id
 const getDefaultRoleId = async () => {
@@ -37,25 +38,27 @@ const createUser = async (userData) => {
 
 // Find user by username
 const findUserByUsername = async (username) => {
-  const query = `
-      SELECT
-        user_id,
-        username,
-        pgp_sym_decrypt(email::bytea, $2) AS email,
-        pgp_sym_decrypt(phone::bytea, $2) AS phone,
-        password,
-        role_level_id,
-        first_name,
-        last_name,
-        biography,
-        profile_picture,
-        store_credit,
-        created_at
-      FROM users
-      WHERE username = $1
-    `;
+  const encryptionKey = process.env.ENCRYPTION_SECRET;
 
-  const values = [username, process.env.ENCRYPTION_SECRET];
+  const query = `
+    SELECT
+      user_id,
+      username,
+      pgp_sym_decrypt(email::bytea, $2) AS email,
+      pgp_sym_decrypt(phone::bytea, $2) AS phone,
+      password,
+      role_level_id,
+      first_name,
+      last_name,
+      biography,
+      profile_picture,
+      store_credit,
+      created_at
+    FROM users
+    WHERE username = $1
+  `;
+
+  const values = [username, encryptionKey];
   const { rows } = await pool.query(query, values);
   return rows[0];
 };
