@@ -102,6 +102,37 @@ exports.getProfileOverview = async (req, res) => {
   }
 };
 
+// ✅ Public Profile Route
+exports.getPublicProfile = async (req, res) => {
+  const { username } = req.params;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        u.username,
+        u.biography,
+        u.profile_picture,
+        rl.role_name
+      FROM users u
+      LEFT JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
+      WHERE u.username = $1
+
+      `,
+      [username]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error("Public profile error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // ✅ PATCH: Update username only
 exports.updateProfile = async (req, res) => {
   const userId = req.user.userId;
