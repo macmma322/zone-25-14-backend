@@ -1,22 +1,26 @@
-// index.js
+// Zone 25-14 Backend API (index.js)
+// Main entry point for the Zone 25-14 backend API
+// This file sets up the Express server, connects to the database, and mounts all routes.
+// It also includes middleware for security, rate limiting, and CORS.
+
 require("dotenv").config({ path: "./src/.env" });
 const express = require("express");
 const pool = require("./src/config/db.js");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const cookieParser = require("cookie-parser"); // 🔥 Add this
 
 const app = express();
 
-// 🔥 Must come BEFORE any routes
-app.use(express.json()); // ✅ Allows parsing JSON bodies
+app.use(express.json()); // ✅ Parses JSON bodies
+app.use(cookieParser()); // ✅ Parses cookies like authToken
 
 const corsOptions = {
-  origin: "http://localhost:3000", // your frontend port
-  credentials: true, // if you use cookies later
+  origin: "http://localhost:3000",
+  credentials: true,
 };
-
-app.use(cors(corsOptions)); // ✅ Always active
+app.use(cors(corsOptions));
 
 // ▪️ Rate Limiting
 const limiter = rateLimit({

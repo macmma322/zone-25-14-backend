@@ -117,7 +117,6 @@ exports.getPublicProfile = async (req, res) => {
       FROM users u
       LEFT JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
       WHERE u.username = $1
-
       `,
       [username]
     );

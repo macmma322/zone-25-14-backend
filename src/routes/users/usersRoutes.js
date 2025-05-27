@@ -6,33 +6,26 @@ const { protectRoute } = require("../../middleware/authMiddleware");
 const upload = require("../../middleware/uploadMiddleware");
 const privacyRoutes = require("./userPrivacyRoutes");
 
-// ✅ Get full profile overview
+// ✅ Auth routes
 router.get("/profile", protectRoute, userController.getProfileOverview);
-// ✅ Public profile view by username
-router.get("/:username", userController.getPublicProfile);
-
-// ✅ Update username
 router.patch("/profile", protectRoute, userController.updateProfile);
-
-// ✅ Upload avatar image
 router.patch(
   "/profile/avatar",
   protectRoute,
   upload.single("avatar"),
   userController.uploadAvatar
 );
-
-// ✅ Set birthday (only once)
 router.patch("/profile/birthday", protectRoute, userController.setBirthday);
 
-// ✅ User Preferences
 router.get("/preferences", protectRoute, userController.getUserPreferences);
 router.patch(
   "/preferences",
   protectRoute,
   userController.updateUserPreferences
 );
-
 router.use("/privacy", privacyRoutes);
+
+// ✅ MUST BE LAST
+router.get("/:username", userController.getPublicProfile);
 
 module.exports = router;

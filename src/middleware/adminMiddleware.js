@@ -1,44 +1,37 @@
-// File: src/middleware/adminMiddleware.js
-const jwt = require('jsonwebtoken');
-const pool = require('../config/db');
+const jwt = require("jsonwebtoken");
+const pool = require("../config/db");
 
 const adminProtect = async (req, res, next) => {
-    let token;
+  const token = req.cookies.authToken; // ✅ use the cookie like protectRoute
 
-    if (
-        req.headers.authorization &&
-        req.headers.authorization.startsWith('Bearer')
-    ) {
-        try {
-            token = req.headers.authorization.split(' ')[1];
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            req.user = {
-                userId: decoded.userId,
-            };
+  if (!token) {
+    return res.status(401).json({ message: "Not authorized, no token" });
+  }
 
-            const query = `
-        SELECT rl.role_name
-        FROM users u
-        JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
-        WHERE u.user_id = $1
-      `;
-            const { rows } = await pool.query(query, [req.user.userId]);
-            const userRole = rows[0]?.role_name;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { userId: decoded.userId };
 
-            if (["Store Chief", "Hype Lead", "Founder"].includes(userRole)) {
-                next();
-            } else {
-                return res.status(403).json({ message: 'Access denied. Admins only.' });
-            }
-        } catch (error) {
-            console.error('Admin Auth Error:', error.message);
-            return res.status(401).json({ message: 'Not authorized' });
-        }
+    const query = `
+      SELECT rl.role_name
+      FROM users u
+      JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
+      WHERE u.user_id = $1
+    `;
+    const { rows } = await pool.query(query, [req.user.userId]);
+    const userRole = rows[0]?.role_name;
+
+    if (["Store Chief", "Hype Lead", "Founder"].includes(userRole)) {
+      next(); // ✅ admin access granted
     } else {
-        return res.status(401).json({ message: 'No token provided' });
+      return res.status(403).json({ message: "Access denied. Admins only." });
     }
+  } catch (error) {
+    console.error("Admin Auth Error:", error.message);
+    return res.status(401).json({ message: "Not authorized" });
+  }
 };
 
 module.exports = {
-    adminProtect,
+  adminProtect,
 };

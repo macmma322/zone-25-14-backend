@@ -1,34 +1,27 @@
-// File: src/middleware/authMiddleware.js
-const jwt = require('jsonwebtoken');
+const jwt = require("jsonwebtoken");
 
 const protectRoute = (req, res, next) => {
-  let token;
-
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    try {
-      token = req.headers.authorization.split(' ')[1]; // Bearer <token>
-
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = {
-        userId: decoded.userId,
-        role: decoded.role
-      };
-
-      next();
-    } catch (error) {
-      console.error('Auth Error:', error.message);
-      return res.status(401).json({ message: 'Not authorized, invalid token' });
-    }
-  }
+  const token = req.cookies.authToken;
 
   if (!token) {
-    return res.status(401).json({ message: 'Not authorized, no token' });
+    console.warn("🚫 No token found in cookies.");
+    return res.status(401).json({ message: "Not authorized, no token" });
+  }
+
+  console.log("🍪 Incoming authToken cookie:", token); // ✅ log token
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("🔐 Token valid:", decoded); // ✅ log payload
+    req.user = {
+      userId: decoded.userId,
+      role: decoded.role,
+    };
+    next();
+  } catch (err) {
+    console.error("❌ Invalid token:", err.message);
+    return res.status(401).json({ message: "Not authorized, invalid token" });
   }
 };
 
-module.exports = {
-  protectRoute,
-};
+module.exports = { protectRoute };
