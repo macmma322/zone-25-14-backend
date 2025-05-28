@@ -1,0 +1,20 @@
+// This file is part of the Zone 25 project, which is licensed under the GNU General Public License v3.0.
+// Description: Message reaction model for handling message reaction-related database operations
+// Functions: addReaction
+// Dependencies: pg (PostgreSQL client), db configuration
+// File: src/models/messageReactionModel.js
+
+const pool = require('../config/db');
+
+const addReaction = async (messageId, userId, reaction) => {
+  const { rows } = await pool.query(
+    `INSERT INTO message_reactions (message_id, user_id, reaction)
+     VALUES ($1, $2, $3) RETURNING *`,
+    [messageId, userId, reaction]
+  );
+  return rows[0];
+};
+
+module.exports = {
+  addReaction,
+};

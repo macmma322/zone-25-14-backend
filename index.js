@@ -39,6 +39,7 @@ const cartRoutes = require("./src/routes/cart/cartRoutes");
 const wishlistRoutes = require("./src/routes/wishlist/wishlistRoutes");
 const subscriptionRoutes = require("./src/routes/subscriptions/subscriptionRoutes");
 const rolesRoutes = require("./src/routes/roles/rolesRoutes");
+const messagingRoutes = require('./src/routes/messaging/messagingRoutes');
 
 // ▪️ Mount Routes
 app.use("/api/auth", authRoutes);
@@ -50,7 +51,7 @@ app.use("/api", cartRoutes);
 app.use("/api", wishlistRoutes);
 app.use("/api", subscriptionRoutes);
 app.use("/api/roles", rolesRoutes);
-
+app.use('/api/messaging', messagingRoutes);
 // ▪️ Root Endpoint (Optional: simple welcome message)
 app.get("/", (req, res) => {
   res.send("🔥 Welcome to Zone 25-14 API");
