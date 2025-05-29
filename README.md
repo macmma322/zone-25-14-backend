@@ -1,190 +1,115 @@
-# 🛡️ Zone 25-14 Backend
+<div id="top">
 
-This is the main backend server for **Zone 25-14** —  
-the platform built around loyalty, rebellion, brotherhood, and unstoppable ambition.
+<!-- HEADER STYLE: CLASSIC -->
+<div align="center">
 
-The backend handles **authentication, user management, product control, order processing, loyalty leveling, and admin operations**.
 
----
+# ZONE-25-14-BACKEND
 
-## 🧠 About the Backend
+<em>Empowering connections through seamless user engagement.</em>
 
-Zone 25-14 is a hybrid between e-commerce, social networking, and loyalty-driven movement.  
-The backend forms the **command center** where all data, authentication, permissions, and business logic happens.
+<!-- BADGES -->
+<img src="https://img.shields.io/github/last-commit/macmma322/zone-25-14-backend?style=flat&logo=git&logoColor=white&color=0080ff" alt="last-commit">
+<img src="https://img.shields.io/github/languages/top/macmma322/zone-25-14-backend?style=flat&color=0080ff" alt="repo-top-language">
+<img src="https://img.shields.io/github/languages/count/macmma322/zone-25-14-backend?style=flat&color=0080ff" alt="repo-language-count">
 
-This backend is designed for:
+<em>Built with the tools and technologies:</em>
 
-- Full user registration and authentication
-- Secure JWT login with OAuth2 extension planned
-- Encrypted data protection
-- Products and variations management
-- Orders and Cart systems
-- Loyalty Points + Auto Level-Up engine
-- Role-based Permission System (Explorer, Supporter, Founder, etc.)
-- Admin capabilities for promotions, control, and moderation
+<img src="https://img.shields.io/badge/Express-000000.svg?style=flat&logo=Express&logoColor=white" alt="Express">
+<img src="https://img.shields.io/badge/JSON-000000.svg?style=flat&logo=JSON&logoColor=white" alt="JSON">
+<img src="https://img.shields.io/badge/Markdown-000000.svg?style=flat&logo=Markdown&logoColor=white" alt="Markdown">
+<img src="https://img.shields.io/badge/npm-CB3837.svg?style=flat&logo=npm&logoColor=white" alt="npm">
+<img src="https://img.shields.io/badge/.ENV-ECD53F.svg?style=flat&logo=dotenv&logoColor=black" alt=".ENV">
+<img src="https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=flat&logo=JavaScript&logoColor=black" alt="JavaScript">
+<img src="https://img.shields.io/badge/Nodemon-76D04B.svg?style=flat&logo=Nodemon&logoColor=white" alt="Nodemon">
 
----
-
-## 🛠️ Technologies Used
-
-| Stack | Description |
-|:------|:------------|
-| Node.js (v18+) | Core server |
-| Express.js | Routing and API layer |
-| PostgreSQL | Database (managed with `pg` and `pg-pool`) |
-| JWT (jsonwebtoken) | Secure authentication |
-| Bcryptjs | Password hashing |
-| Axios | Internal and external API calls (future) |
-| CORS | Cross-origin security |
-| Helmet | Security headers |
-| Express-Rate-Limit | Brute-force protection |
-| Dotenv | Environment variables |
-| Nodemon | Local development auto-restart |
+</div>
+<br>
 
 ---
 
-## 📋 Project Structure
+## Table of Contents
 
-```bash
-zone-25-14-backend/
-├── src/
-│   ├── config/         # Database, JWT config
-│   ├── controllers/    # Main API business logic
-│   ├── middleware/     # Auth, Role protection
-│   ├── models/         # SQL queries and logic
-│   ├── routes/         # Express routes (auth, users, products, etc.)
-│   ├── services/       # Helper functions (email, loyalty, etc.)
-│   ├── utils/          # Utility functions
-├── .env                # Environment variables
-├── server.js           # Main server file
-├── package.json        # Dependencies
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Usage](#usage)
+    - [Testing](#testing)
 
 ---
 
-## 🔐 Authentication Flow
+## Overview
 
-1.Register → New user created → Password hashed with bcrypt.
-2.Login → JWT Token issued → Saved in frontend.
-3.Protected Routes → Token attached automatically with Axios interceptors.
-4.Role-Based Access → Middleware checks if user is Admin, Moderator, or Founder for protected routes.
+Zone 25-14 Backend is a powerful API designed to streamline user interactions within a loyalty-driven e-commerce platform. 
 
----
+**Why zone-25-14-backend?**
 
-## 🛡️ Security Features
+This project serves as the central hub for managing user interactions, ensuring secure data handling and role-based access. The core features include:
 
--Passwords hashed (bcrypt with 12 rounds).
--JWT secret and expiry handled through .env.
--CORS policy enabled.
--Helmet security headers.
--Rate Limiting on login/register routes.
+- 🛡️ **Robust API Management:** Establishes a secure and scalable backend for efficient API management.
+- 🔑 **Comprehensive User Authentication:** Implements JWT-based authentication for secure access control.
+- 🛒 **Dynamic Product and Order Management:** Facilitates seamless product and order processing for enhanced user experience.
+- 💬 **Real-time Messaging Capabilities:** Supports dynamic user interactions through integrated messaging features.
+- 🎁 **Loyalty and Subscription Systems:** Drives user retention with loyalty points and subscription management.
 
 ---
 
-## 📦 How to Run Locally
+## Getting Started
 
-1.Clone the repository:
-    -git clone https://github.com/YOUR-USERNAME/zone-25-14-backend.git
+### Prerequisites
 
-2.Install dependencies:
-    -npm install
+This project requires the following dependencies:
 
-3.Create a .env file:
-    PORT=5000
-    DB_USER=postgres
-    DB_PASSWORD=yourpassword
-    DB_HOST=localhost
-    DB_PORT=5432
-    DB_NAME=the_zone_core
-    JWT_SECRET=yourstrongsecret
-    JWT_EXPIRES_IN=7d
+- **Programming Language:** JavaScript
+- **Package Manager:** Npm
 
-4.Start server in dev mode:
-    -npm run dev
+### Installation
 
----
+Build zone-25-14-backend from the source and intsall dependencies:
 
-## 🛠️ Current APIs Implemented
+1. **Clone the repository:**
 
-    Endpoint                    | Description
-    POST /api/auth/register     | Register new user
-    POST /api/auth/login        | Login and issue token
-    GET /api/users/me           | Fetch current user profile
-    POST /api/products          | Create new product (Admin only)
-    GET /api/products           | Fetch all products
-    POST /api/orders            | Create new order + earn points (Connected to Level-Up System)
+    ```sh
+    ❯ git clone https://github.com/macmma322/zone-25-14-backend
+    ```
 
----
+2. **Navigate to the project directory:**
 
-## 🔥 Future Planned APIs
+    ```sh
+    ❯ cd zone-25-14-backend
+    ```
 
-    -Wishlist API
-    -Friends System API
-    -Messaging System API
-    -Admin Dashboard APIs
-    -Gift Card System
-    -Loyalty Badges System
-    -Public Wishlists & Gifting
+3. **Install the dependencies:**
 
----
+**Using [npm](https://www.npmjs.com/):**
 
-## 🛡️ Mission Philosophy
+```sh
+❯ npm install
+```
 
-Zone 25-14 Backend is designed with these principles:
+### Usage
 
-    -Security First: No user data is left exposed.
-    -Performance Driven: Minimal, clean, fast server operations.
-    -Extensible: New systems (friends, donations, giveaways) can be added easily.
-    -Scalable: Built to handle growth — users, products, live events.
+Run the project with:
+
+**Using [npm](https://www.npmjs.com/):**
+
+```sh
+npm start
+```
+
+### Testing
+
+Zone-25-14-backend uses the {__test_framework__} test framework. Run the test suite with:
+
+**Using [npm](https://www.npmjs.com/):**
+
+```sh
+npm test
+```
 
 ---
-# Zone 25-14 - Backend API
 
-This is the Node.js + Express backend for the Zone 25-14 project.
+<div align="left"><a href="#top">⬆ Return</a></div>
 
-## Technologies Used
-
-- Node.js
-- Express.js
-- PostgreSQL
-- JWT (Authentication)
-- Bcrypt (Password Encryption)
-- CORS Middleware
-- pg (PostgreSQL Driver)
-- dotenv for environment variables
-
-## Setup
-
-1. Clone the repository.
-2. Navigate into the backend folder:
-   ```bash
-   cd zone-25-14-backend
-Install dependencies:
-npm install
-
-Create a .env file:
-PORT=5000
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=your_db_name
-JWT_SECRET=your_secret_key
-JWT_EXPIRES_IN=7d
-
-Start development server:
-npm run dev
-
-API Endpoints
-/api/auth/register - Register User
-/api/auth/login - Login User
-/api/users/me - Fetch Current User
-/api/products - Products Listing
-(More coming soon: Orders, Cart, Wishlist, Friends)
-
-Notes
-Protected routes require Bearer JWT Token in Headers.
-
-Admin-only routes protected with adminMiddleware.
-
-Loyalty system (points → auto-leveling) is built in.
-
+---
