@@ -2,7 +2,7 @@ const pool = require("../../config/db");
 
 // ✅ GET Profile Overview
 exports.getProfileOverview = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
 
   try {
     const encryptionKey = process.env.ENCRYPTION_SECRET;
@@ -18,7 +18,6 @@ exports.getProfileOverview = async (req, res) => {
         rl.discount_percentage,
         rl.required_points,
         rl.is_staff,
-        u.created_at, 
         u.biography
       FROM users u
       JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
@@ -29,22 +28,8 @@ exports.getProfileOverview = async (req, res) => {
 
     const user = userRes.rows[0];
 
-    const nextRes = await pool.query(
-      `
-      SELECT role_name, required_points
-      FROM user_roles_levels
-      WHERE required_points > $1
-      ORDER BY required_points ASC
-      LIMIT 1
-    `,
-      [user.points]
-    );
-
-    let nextRank;
-
-    if (user.is_staff) {
-      nextRank = "Staff — Max Tier";
-    } else {
+    let nextRank = "MAXED OUT";
+    if (!user.is_staff) {
       const nextRes = await pool.query(
         `
         SELECT role_name, required_points
@@ -56,13 +41,15 @@ exports.getProfileOverview = async (req, res) => {
         [user.points]
       );
 
-      nextRank = nextRes.rows[0]
-        ? {
-            name: nextRes.rows[0].role_name,
-            required_points: nextRes.rows[0].required_points,
-            points_needed: nextRes.rows[0].required_points - user.points,
-          }
-        : "MAXED OUT";
+      if (nextRes.rows.length) {
+        nextRank = {
+          name: nextRes.rows[0].role_name,
+          required_points: nextRes.rows[0].required_points,
+          points_needed: nextRes.rows[0].required_points - user.points,
+        };
+      }
+    } else {
+      nextRank = "Staff — Max Tier";
     }
 
     const subs = await pool.query(
@@ -85,13 +72,13 @@ exports.getProfileOverview = async (req, res) => {
 
     res.status(200).json({
       username: user.username,
-      email: user.email, // ✅ add this!
+      email: user.email,
       avatar: user.profile_picture,
       points: user.points,
       role: user.role_name,
-      created_at: user.created_at, // ✅ here too
+      created_at: user.created_at,
       discount: `${user.discount_percentage}%`,
-      next_rank: nextRank || "MAXED OUT",
+      next_rank: nextRank,
       subscriptions: subs.rows,
       cart_items: parseInt(cartCount.rows[0].count),
       wishlist_items: parseInt(wishlistCount.rows[0].count),
@@ -110,6 +97,7 @@ exports.getPublicProfile = async (req, res) => {
     const result = await pool.query(
       `
       SELECT 
+        u.user_id,
         u.username,
         u.biography,
         u.profile_picture,
@@ -134,7 +122,7 @@ exports.getPublicProfile = async (req, res) => {
 
 // ✅ PATCH: Update username only
 exports.updateProfile = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
   const { username } = req.body;
 
   try {
@@ -152,7 +140,7 @@ exports.updateProfile = async (req, res) => {
 
 // ✅ PATCH: Upload avatar image (used with multer)
 exports.uploadAvatar = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
 
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
@@ -178,7 +166,7 @@ exports.uploadAvatar = async (req, res) => {
 
 // ✅ PATCH: Set birthday (only once)
 exports.setBirthday = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
   const { birthday } = req.body;
 
   try {
@@ -186,7 +174,7 @@ exports.setBirthday = async (req, res) => {
       `SELECT birthday FROM users WHERE user_id = $1`,
       [userId]
     );
-    if (result.rows[0].birthday) {
+    if (result.rows[0]?.birthday) {
       return res.status(400).json({ message: "Birthday is already set." });
     }
 
@@ -204,7 +192,7 @@ exports.setBirthday = async (req, res) => {
 
 // ✅ GET user preferences
 exports.getUserPreferences = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
 
   try {
     const result = await pool.query(
@@ -229,7 +217,7 @@ exports.getUserPreferences = async (req, res) => {
 
 // ✅ PATCH: Update user preferences
 exports.updateUserPreferences = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user.user_id;
   const { theme_mode, language, preferred_currency, email_notifications } =
     req.body;
 
@@ -252,3 +240,4 @@ exports.updateUserPreferences = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+

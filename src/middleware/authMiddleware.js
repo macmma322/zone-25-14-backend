@@ -14,7 +14,8 @@ const protectRoute = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log("🔐 Token valid:", decoded); // ✅ log payload
     req.user = {
-      userId: decoded.userId,
+      user_id: decoded.user_id,
+      username: decoded.username,
       role: decoded.role,
     };
     next();

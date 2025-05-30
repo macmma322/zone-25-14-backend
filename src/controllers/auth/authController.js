@@ -53,7 +53,7 @@ const login = async (req, res) => {
     }
 
     const payload = {
-      userId: user.user_id,
+      user_id: user.user_id,
       username: user.username,
       role: user.role_level_id,
     };

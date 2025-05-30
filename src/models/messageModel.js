@@ -2,7 +2,7 @@
 // Functions: sendMessage, getMessagesByConversation
 // Dependencies: pg (PostgreSQL client), db configuration
 // File: src/models/messageModel.js
-const pool = require('../config/db');
+const pool = require("../config/db");
 
 const sendMessage = async (conversationId, senderId, content) => {
   const { rows } = await pool.query(
