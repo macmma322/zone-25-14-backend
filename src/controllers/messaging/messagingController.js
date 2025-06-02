@@ -67,7 +67,6 @@ const createConversation = async (req, res) => {
   }
 };
 
-
 const addMember = async (req, res) => {
   try {
     const { conversationId, newMemberId } = req.body;
@@ -168,26 +167,39 @@ const sendMessage = async (req, res) => {
 };
 
 const getMessages = async (req, res) => {
+  const { conversationId, before, limit = 30 } = req.query;
+
+  if (!conversationId) {
+    return res.status(400).json({ error: "Missing conversationId" });
+  }
+
   try {
-    const { conversationId } = req.params;
-    const user_id = req.user?.user_id;
+    const values = [conversationId];
+    let query = `
+      SELECT m.*, u.username
+      FROM messages m
+      JOIN users u ON u.user_id = m.sender_id
+      WHERE m.conversation_id = $1 AND m.is_deleted = false
+    `;
 
-    console.log("🔍 user_id from token:", user_id);
-
-    const members = await ConversationMember.getConversationMembers(
-      conversationId
-    );
-    console.log("🔍 Members in conversation:", members);
-
-    if (!user_id || !members.some((m) => m.user_id === user_id)) {
-      return res.status(403).json({ error: "Access denied" });
+    if (before) {
+      query += ` AND m.sent_at < (SELECT sent_at FROM messages WHERE message_id = $2)`;
+      values.push(before);
     }
 
-    const messages = await Message.getMessagesByConversation(conversationId);
-    return res.status(200).json({ messages });
+    query += ` ORDER BY m.sent_at DESC LIMIT $${values.length + 1}`;
+    values.push(limit);
+
+    const result = await pool.query(query, values);
+
+    const hasMore = result.rows.length === parseInt(limit);
+    res.json({
+      messages: result.rows,
+      hasMore,
+    });
   } catch (err) {
-    console.error("getMessages error:", err);
-    return res.status(500).json({ error: "Failed to fetch messages" });
+    console.error("Error fetching messages:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
