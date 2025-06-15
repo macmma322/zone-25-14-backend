@@ -43,6 +43,8 @@ app.use("/api", require("./src/routes/wishlist/wishlistRoutes"));
 app.use("/api", require("./src/routes/subscriptions/subscriptionRoutes"));
 app.use("/api/roles", require("./src/routes/roles/rolesRoutes"));
 app.use("/api/messaging", require("./src/routes/messaging/messagingRoutes"));
+app.use("/api/reactions", require("./src/routes/messaging/reactionRoutes"));
+
 
 // ▪️ Root Route
 app.get("/", (req, res) => {

@@ -18,6 +18,9 @@ const { protectRoute } = require("../../middleware/authMiddleware");
 // All routes protected
 router.use(protectRoute);
 
+// 🔹 Fetch all conversations for the authenticated user
+router.get("/messages", getMessages);
+
 // 🔹 Create a new conversation (1-on-1 or group)
 router.post("/conversations", createConversation);
 
@@ -29,8 +32,5 @@ router.post("/messages", sendMessage);
 
 // 🔹 Fetch messages in a conversation
 router.get("/messages/:conversationId", getMessages);
-
-// 🔹 React to a message
-router.post("/messages/react", reactToMessage);
 
 module.exports = router;

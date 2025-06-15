@@ -4,11 +4,16 @@
 // File: src/models/messageModel.js
 const pool = require("../config/db");
 
-const sendMessage = async (conversationId, senderId, content) => {
+const sendMessage = async (
+  conversationId,
+  senderId,
+  content,
+  replyToId = null
+) => {
   const { rows } = await pool.query(
-    `INSERT INTO messages (conversation_id, sender_id, content)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [conversationId, senderId, content]
+    `INSERT INTO messages (conversation_id, sender_id, content, reply_to_id)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [conversationId, senderId, content, replyToId]
   );
   return rows[0];
 };

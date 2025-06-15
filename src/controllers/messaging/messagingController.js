@@ -1,7 +1,7 @@
 // Description: Message model for handling message-related database operations
 // Functions: createConversation, getConversationById
 // Dependencies: pg (PostgreSQL client), db configuration
-// File: src/models/conversationModel.js
+// File: src/controllers/messaging/messagingController.js
 const { getIO } = require("../../config/socket.js");
 const Conversation = require("../../models/conversationModel");
 const ConversationMember = require("../../models/conversationMemberModel");
@@ -96,73 +96,65 @@ const Message = require("../../models/messageModel");
 
 const sendMessage = async (req, res) => {
   try {
-    const { conversationId, content } = req.body;
     const user_id = req.user.user_id;
+    const { conversationId, content, replyToMessageId } = req.body;
 
-    const convoCheck = await pool.query(
-      `SELECT is_group FROM conversations WHERE conversation_id = $1`,
-      [conversationId]
+    if (!conversationId || !content) {
+      return res
+        .status(400)
+        .json({ error: "Missing conversationId or content" });
+    }
+
+    // Save the message
+    const message = await Message.sendMessage(
+      conversationId,
+      user_id,
+      content,
+      replyToMessageId || null
     );
 
-    if (!convoCheck.rows.length)
-      return res.status(404).json({ error: "Conversation not found" });
-
-    const isGroup = convoCheck.rows[0].is_group;
-
-    const members = await ConversationMember.getConversationMembers(
-      conversationId
-    );
-    const sender = members.find((m) => m.user_id === user_id);
-
-    if (!sender)
-      return res.status(403).json({ error: "You are not in this chat" });
-    if (sender.role === "muted")
-      return res.status(403).json({ error: "You are muted" });
-
-    const message = await Message.sendMessage(conversationId, user_id, content);
-
-    // ✅ Get sender username for frontend display
-    const userRes = await pool.query(
+    // Fetch the sender username
+    const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [user_id]
     );
-    const username = userRes.rows[0]?.username || "Unknown";
+    const username = senderRes.rows[0]?.username || "Unknown";
 
-    // ✅ Emit real-time message to all participants
-    getIO().to(conversationId).emit("receiveMessage", {
-      message_id: message.message_id,
-      username,
-      content: message.content,
-      sent_at: message.sent_at,
-    });
-
-    // 🔁 Handle friend check only if not group
-    if (!isGroup) {
-      const friendId = members.find((m) => m.user_id !== user_id)?.user_id;
-
-      const isFriend = await pool.query(
-        `SELECT 1 FROM friends 
-         WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))
-           AND is_removed = false AND is_blocked = false`,
-        [user_id, friendId]
+    // Optional: fetch replied-to message info
+    let replyToMessage = null;
+    if (replyToMessageId) {
+      const replyRes = await pool.query(
+        `SELECT message_id, content, sender_id FROM messages WHERE message_id = $1`,
+        [replyToMessageId]
       );
-
-      if (!isFriend.rows.length) {
-        await pool.query(
-          `INSERT INTO message_requests (sender_id, receiver_id, content)
-           VALUES ($1, $2, $3)`,
-          [user_id, friendId, content]
+      if (replyRes.rows.length > 0) {
+        const replyUserRes = await pool.query(
+          `SELECT username FROM users WHERE user_id = $1`,
+          [replyRes.rows[0].sender_id]
         );
-        return res
-          .status(202)
-          .json({ message: "Message request sent and pending approval." });
+        replyToMessage = {
+          message_id: replyRes.rows[0].message_id,
+          content: replyRes.rows[0].content,
+          username: replyUserRes.rows[0]?.username || "Unknown",
+        };
       }
     }
 
-    return res.status(201).json({ message });
+    const fullMessage = {
+      message_id: message.message_id,
+      conversation_id: conversationId,
+      sender_id: user_id,
+      username,
+      content: message.content,
+      sent_at: message.sent_at,
+      reply_to_message: replyToMessage || undefined,
+    };
+
+    getIO().to(conversationId).emit("receiveMessage", fullMessage);
+    return res.status(201).json({ message: fullMessage });
   } catch (err) {
-    console.error("sendMessage error:", err);
-    return res.status(500).json({ error: "Failed to send message" });
+    console.error("Send message error:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -176,9 +168,19 @@ const getMessages = async (req, res) => {
   try {
     const values = [conversationId];
     let query = `
-      SELECT m.*, u.username
+      SELECT 
+        m.message_id,
+        m.sender_id,
+        u.username,
+        m.content,
+        m.sent_at,
+        m.reply_to_id,
+        r.content AS reply_to_content,
+        ru.username AS reply_to_username
       FROM messages m
       JOIN users u ON u.user_id = m.sender_id
+      LEFT JOIN messages r ON m.reply_to_id = r.message_id
+      LEFT JOIN users ru ON r.sender_id = ru.user_id
       WHERE m.conversation_id = $1 AND m.is_deleted = false
     `;
 
@@ -190,35 +192,68 @@ const getMessages = async (req, res) => {
     query += ` ORDER BY m.sent_at DESC LIMIT $${values.length + 1}`;
     values.push(limit);
 
-    const result = await pool.query(query, values);
+    const messagesResult = await pool.query(query, values);
+    const messages = messagesResult.rows;
 
-    const hasMore = result.rows.length === parseInt(limit);
-    res.json({
-      messages: result.rows,
-      hasMore,
-    });
+    // Extract all message_ids
+    const messageIds = messages.map((msg) => msg.message_id);
+
+    // Fetch reactions for those message_ids
+    let reactionsMap = new Map();
+    if (messageIds.length > 0) {
+      const reactionQuery = `
+        SELECT 
+          mr.reaction_id,
+          mr.message_id,
+          mr.user_id,
+          u.username,
+          mr.reaction,
+          mr.reacted_at
+        FROM message_reactions mr
+        JOIN users u ON u.user_id = mr.user_id
+        WHERE mr.message_id = ANY($1)
+      `;
+      const reactionResult = await pool.query(reactionQuery, [messageIds]);
+
+      // Group reactions by message_id
+      reactionResult.rows.forEach((reaction) => {
+        if (!reactionsMap.has(reaction.message_id)) {
+          reactionsMap.set(reaction.message_id, []);
+        }
+        reactionsMap.get(reaction.message_id).push({
+          reaction_id: reaction.reaction_id,
+          user_id: reaction.user_id,
+          username: reaction.username,
+          message_id: reaction.message_id,
+          reaction: reaction.reaction,
+          reacted_at: reaction.reacted_at,
+        });
+      });
+    }
+
+    // Final formatted messages
+    const formattedMessages = messages.map((msg) => ({
+      message_id: msg.message_id,
+      sender_id: msg.sender_id,
+      username: msg.username,
+      content: msg.content,
+      sent_at: msg.sent_at,
+      reply_to_id: msg.reply_to_id,
+      reply_to_message: msg.reply_to_id
+        ? {
+            message_id: msg.reply_to_id,
+            username: msg.reply_to_username,
+            content: msg.reply_to_content,
+          }
+        : undefined,
+      reactions: reactionsMap.get(msg.message_id) || [],
+    }));
+
+    const hasMore = messages.length === parseInt(limit);
+    res.json({ messages: formattedMessages, hasMore });
   } catch (err) {
     console.error("Error fetching messages:", err);
     res.status(500).json({ error: "Internal server error" });
-  }
-};
-
-const MessageReaction = require("../../models/messageReactionModel");
-
-const reactToMessage = async (req, res) => {
-  try {
-    const { messageId, reaction } = req.body;
-    const user_id = req.user.user_id;
-
-    const react = await MessageReaction.addReaction(
-      messageId,
-      user_id,
-      reaction
-    );
-    return res.status(200).json({ reaction: react });
-  } catch (err) {
-    console.error("reactToMessage error:", err);
-    return res.status(500).json({ error: "Failed to add reaction" });
   }
 };
 
@@ -227,5 +262,4 @@ module.exports = {
   addMember,
   sendMessage,
   getMessages,
-  reactToMessage,
 };
