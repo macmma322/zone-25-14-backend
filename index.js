@@ -24,10 +24,12 @@ app.use(
   })
 );
 
+// Apply rate limiting to the API
 app.use(
   rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per `windowMs`
+    message: "Too many requests from this IP, please try again later.",
   })
 );
 
@@ -46,7 +48,10 @@ app.use("/api/messaging", require("./src/routes/messaging/messagingRoutes"));
 app.use("/api/reactions", require("./src/routes/messaging/reactionRoutes"));
 
 // ✅ Notifications route
-app.use("/api/notifications", require("./src/routes/notifications/notificationRoutes"));
+app.use(
+  "/api/notifications",
+  require("./src/routes/notifications/notificationRoutes")
+);
 
 // ▪️ Root Route
 app.get("/", (req, res) => {
