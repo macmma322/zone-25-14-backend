@@ -1,4 +1,8 @@
+// zone_25-14_backend/src/socket.js
 let ioInstance;
+const onlineUsers = {}; // user_id → socket.id
+
+const pool = require("./db");
 
 module.exports = {
   initSocket(server) {
@@ -6,7 +10,7 @@ module.exports = {
 
     ioInstance = new Server(server, {
       cors: {
-        origin: "http://localhost:3000", // Adjust for production if needed
+        origin: "http://localhost:3000",
         credentials: true,
       },
     });
@@ -14,18 +18,26 @@ module.exports = {
     ioInstance.on("connection", (socket) => {
       console.log(`📡 Socket connected: ${socket.id}`);
 
-      // 🟢 Join chat room
+      const userId = socket.handshake.auth?.userId;
+
+      if (userId) {
+        onlineUsers[userId] = socket.id;
+        console.log(`✅ User ${userId} is now online`);
+        broadcastPresenceToFriends(userId, "online");
+      }
+
+      // JOIN ROOM FOR CHATS
       socket.on("joinRoom", (conversationId) => {
         socket.join(conversationId);
         console.log(`👥 Socket ${socket.id} joined room ${conversationId}`);
       });
 
-      // ✍️ Typing indicator (not used yet, but ready)
+      // TYPING INDICATOR (future)
       socket.on("typing", ({ conversationId, sender }) => {
         socket.to(conversationId).emit("showTyping", sender);
       });
 
-      // 💬 Real-time message relay from frontend → others
+      // MESSAGE RELAY
       socket.on("sendMessage", (message) => {
         const convoId = message.conversation_id;
         if (!convoId)
@@ -33,15 +45,18 @@ module.exports = {
         socket.to(convoId).emit("receiveMessage", message);
       });
 
-      // 💥 Real-time reaction update relay
+      // REACTION RELAY
       socket.on("sendReactionUpdate", ({ conversationId, data }) => {
         if (!conversationId || !data) return;
         socket.to(conversationId).emit("reactionUpdated", data);
       });
 
-      // ❌ Disconnection
       socket.on("disconnect", () => {
-        console.log(`❌ Socket disconnected: ${socket.id}`);
+        console.log(`❌ Disconnected: ${socket.id}`);
+        if (userId) {
+          delete onlineUsers[userId];
+          broadcastPresenceToFriends(userId, "offline");
+        }
       });
     });
 
@@ -54,4 +69,27 @@ module.exports = {
     }
     return ioInstance;
   },
+
+  getOnlineUsers() {
+    return onlineUsers;
+  },
 };
+
+async function broadcastPresenceToFriends(userId, status) {
+  try {
+    const result = await pool.query(
+      `SELECT friend_id FROM friends WHERE user_id = $1 AND is_removed = FALSE AND is_blocked = FALSE`,
+      [userId]
+    );
+    const friends = result.rows.map((row) => row.friend_id);
+
+    friends.forEach((fid) => {
+      const fidSocket = onlineUsers[fid];
+      if (fidSocket) {
+        ioInstance.to(fidSocket).emit("presence", { userId, status });
+      }
+    });
+  } catch (err) {
+    console.error("❗ Presence broadcast error:", err);
+  }
+}

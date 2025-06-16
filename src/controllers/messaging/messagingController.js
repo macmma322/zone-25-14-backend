@@ -1,18 +1,15 @@
-// Description: Message model for handling message-related database operations
-// Functions: createConversation, getConversationById
-// Dependencies: pg (PostgreSQL client), db configuration
-// File: src/controllers/messaging/messagingController.js
 const { getIO } = require("../../config/socket.js");
 const Conversation = require("../../models/conversationModel");
 const ConversationMember = require("../../models/conversationMemberModel");
+const Message = require("../../models/messageModel");
 const pool = require("../../config/db");
+const { updateLastMessageTime } = require("../users/relationshipController");
 
 const createConversation = async (req, res) => {
   try {
     const { isGroup, groupName, memberIds } = req.body;
     const user_id = req.user.user_id;
 
-    // 🔒 Only check for existing convo if it's 1-on-1
     if (!isGroup && memberIds.length === 1) {
       const existing = await pool.query(
         `SELECT c.conversation_id
@@ -26,7 +23,6 @@ const createConversation = async (req, res) => {
       );
 
       if (existing.rows.length) {
-        // ✅ Return the existing convo instead of creating a new one
         return res.status(200).json({
           conversation: { conversation_id: existing.rows[0].conversation_id },
           existing: true,
@@ -34,21 +30,18 @@ const createConversation = async (req, res) => {
       }
     }
 
-    // 🧱 Create a new conversation
     const convo = await Conversation.createConversation(
       isGroup,
       isGroup ? groupName : null,
       user_id
     );
 
-    // Add creator as owner
     await ConversationMember.addMemberToConversation(
       convo.conversation_id,
       user_id,
       "owner"
     );
 
-    // Add other members
     if (Array.isArray(memberIds)) {
       for (const id of memberIds) {
         if (id !== user_id) {
@@ -92,8 +85,6 @@ const addMember = async (req, res) => {
   }
 };
 
-const Message = require("../../models/messageModel");
-
 const sendMessage = async (req, res) => {
   try {
     const user_id = req.user.user_id;
@@ -105,7 +96,6 @@ const sendMessage = async (req, res) => {
         .json({ error: "Missing conversationId or content" });
     }
 
-    // Save the message
     const message = await Message.sendMessage(
       conversationId,
       user_id,
@@ -113,14 +103,12 @@ const sendMessage = async (req, res) => {
       replyToMessageId || null
     );
 
-    // Fetch the sender username
     const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [user_id]
     );
     const username = senderRes.rows[0]?.username || "Unknown";
 
-    // Optional: fetch replied-to message info
     let replyToMessage = null;
     if (replyToMessageId) {
       const replyRes = await pool.query(
@@ -137,6 +125,22 @@ const sendMessage = async (req, res) => {
           content: replyRes.rows[0].content,
           username: replyUserRes.rows[0]?.username || "Unknown",
         };
+      }
+    }
+
+    // 🔄 Update last_message_time for 1-on-1 chats
+    const memberRes = await pool.query(
+      `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
+      [conversationId]
+    );
+
+    if (memberRes.rows.length === 2) {
+      const friendId = memberRes.rows.find(
+        (m) => m.user_id !== user_id
+      )?.user_id;
+      if (friendId) {
+        await updateLastMessageTime(user_id, friendId);
+        await updateLastMessageTime(friendId, user_id);
       }
     }
 
@@ -195,11 +199,9 @@ const getMessages = async (req, res) => {
     const messagesResult = await pool.query(query, values);
     const messages = messagesResult.rows;
 
-    // Extract all message_ids
     const messageIds = messages.map((msg) => msg.message_id);
-
-    // Fetch reactions for those message_ids
     let reactionsMap = new Map();
+
     if (messageIds.length > 0) {
       const reactionQuery = `
         SELECT 
@@ -215,7 +217,6 @@ const getMessages = async (req, res) => {
       `;
       const reactionResult = await pool.query(reactionQuery, [messageIds]);
 
-      // Group reactions by message_id
       reactionResult.rows.forEach((reaction) => {
         if (!reactionsMap.has(reaction.message_id)) {
           reactionsMap.set(reaction.message_id, []);
@@ -231,7 +232,6 @@ const getMessages = async (req, res) => {
       });
     }
 
-    // Final formatted messages
     const formattedMessages = messages.map((msg) => ({
       message_id: msg.message_id,
       sender_id: msg.sender_id,

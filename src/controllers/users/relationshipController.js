@@ -100,7 +100,29 @@ const sendFriendRequest = async (req, res) => {
        VALUES ($1, $2)`,
       [senderId, receiverId]
     );
+    // Notify receiver if online
+    try {
+      const { getIO, getOnlineUsers } = require("../../socket");
+      const io = getIO();
+      const onlineUsers = getOnlineUsers();
 
+      const receiverSocket = onlineUsers[receiverId];
+
+      if (receiverSocket) {
+        const senderRes = await pool.query(
+          `SELECT username FROM users WHERE user_id = $1`,
+          [senderId]
+        );
+        const senderUsername = senderRes.rows[0]?.username ?? "Someone";
+
+        io.to(receiverSocket).emit("friendRequest", {
+          from: senderId,
+          username: senderUsername,
+        });
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to emit friendRequest notification:", err);
+    }
     return res.status(200).json({ message: "Friend request sent" });
   } catch (err) {
     console.error("sendFriendRequest error:", err);
@@ -189,10 +211,116 @@ const declineFriendRequest = async (req, res) => {
   }
 };
 
+// ✅ TOGGLE PINNED FRIEND
+const togglePinnedFriend = async (req, res) => {
+  const userId = req.user.user_id;
+  const { friendId } = req.body;
+
+  console.log("🔄 Toggle pin called:");
+  console.log("User ID:", userId);
+  console.log("Friend ID:", friendId);
+
+  try {
+    const result = await pool.query(
+      `SELECT pinned FROM friends WHERE user_id = $1 AND friend_id = $2`,
+      [userId, friendId]
+    );
+
+    if (!result.rows.length) {
+      console.log("Friend not found between users.");
+      return res.status(404).json({ error: "Friend not found" });
+    }
+
+    const currentPinned = result.rows[0].pinned;
+    const newPinned = !currentPinned;
+
+    console.log("Current pinned:", currentPinned, "→ New:", newPinned);
+
+    await pool.query(
+      `UPDATE friends SET pinned = $1 WHERE user_id = $2 AND friend_id = $3`,
+      [newPinned, userId, friendId]
+    );
+
+    return res.status(200).json({
+      message: newPinned ? "Pinned successfully" : "Unpinned successfully",
+      pinned: newPinned,
+    });
+  } catch (err) {
+    console.error("togglePinnedFriend error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// ✅ RESET UNREAD COUNT
+const resetUnreadCount = async (req, res) => {
+  const userId = req.user.user_id;
+  const { friendId } = req.body;
+
+  try {
+    await pool.query(
+      `UPDATE friends SET unread_count = 0 WHERE user_id = $1 AND friend_id = $2`,
+      [userId, friendId]
+    );
+
+    return res.status(200).json({ message: "Unread count reset" });
+  } catch (err) {
+    console.error("resetUnreadCount error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// ✅ INTERNAL HELPER — CALL IN MESSAGE SEND
+const updateLastMessageTime = async (userId, friendId) => {
+  try {
+    await pool.query(
+      `UPDATE friends
+       SET last_message_time = CURRENT_TIMESTAMP
+       WHERE user_id = $1 AND friend_id = $2`,
+      [userId, friendId]
+    );
+  } catch (err) {
+    console.error("updateLastMessageTime error:", err);
+  }
+};
+
+const getFriendsList = async (req, res) => {
+  const userId = req.user.user_id;
+  const { offset = 0, limit = 20 } = req.query;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        u.user_id AS friend_id,
+        u.username,
+        u.profile_picture,
+        f.pinned,
+        f.unread_count,
+        f.last_message_time
+      FROM friends f
+      JOIN users u ON u.user_id = f.friend_id
+      WHERE f.user_id = $1 AND f.is_removed = FALSE AND f.is_blocked = FALSE
+      ORDER BY f.pinned DESC, f.last_message_time DESC NULLS LAST
+      LIMIT $2 OFFSET $3
+      `,
+      [userId, limit, offset]
+    );
+
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error("getFriendsList error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 module.exports = {
   getRelationshipStatus,
   sendFriendRequest,
   cancelFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
+  togglePinnedFriend,
+  resetUnreadCount,
+  updateLastMessageTime,
+  getFriendsList,
 };
