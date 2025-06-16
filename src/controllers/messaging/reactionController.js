@@ -3,7 +3,11 @@
 // Description: Contains functions to add reactions to messages and retrieve reactions by message or conversation
 const db = require("../../config/db");
 const { addReaction } = require("../../models/messageReactionModel");
-const { getIO } = require("../../config/socket"); // <-- get active Socket.IO instance
+const { getIO, getSocketIdByUserId } = require("../../config/socket");
+const { sendNotification } = require("../../services/notificationService");
+const {
+  getDefaultNotificationContent,
+} = require("../../utils/notificationHelpers");
 
 const toggleReactionController = async (req, res) => {
   const { message_id, reaction } = req.body;
@@ -44,9 +48,9 @@ const toggleReactionController = async (req, res) => {
     );
     const conversationId = convoResult.rows[0]?.conversation_id;
 
-    // 📡 Real-time update
+    // 📡 Real-time emit to room
+    const io = getIO();
     if (conversationId && type) {
-      const io = getIO();
       io.to(conversationId).emit("reactionUpdated", {
         message_id,
         user_id,
@@ -56,7 +60,36 @@ const toggleReactionController = async (req, res) => {
       });
     }
 
-    // 🎯 Final response
+    // 🔔 Smart Notification
+    if (type === "add" && conversationId) {
+      // Get other members
+      const memberRes = await db.query(
+        `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
+        [conversationId]
+      );
+
+      const room = io.sockets.adapter.rooms.get(conversationId); // Set of socket IDs
+      const socketsInRoom = room ? Array.from(room) : [];
+
+      for (const member of memberRes.rows) {
+        const targetId = member.user_id;
+        if (targetId === user_id) continue;
+
+        const socketId = getSocketIdByUserId(targetId);
+        const isInRoom = socketsInRoom.includes(socketId);
+
+        if (!isInRoom) {
+          await sendNotification(
+            targetId,
+            "reaction",
+            getDefaultNotificationContent("reaction", { senderName: username }),
+            `/chat/${conversationId}`
+          );
+        }
+      }
+    }
+
+    // ✅ Respond
     if (type === "remove") {
       res.status(200).json({ removed: true, emoji: reaction });
     } else if (type === "add" && reactionData) {

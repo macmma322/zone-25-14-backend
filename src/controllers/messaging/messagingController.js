@@ -122,7 +122,7 @@ const sendMessage = async (req, res) => {
         .json({ error: "Missing conversationId or content" });
     }
 
-    // Save message to DB
+    // 1. Save to DB
     const message = await Message.sendMessage(
       conversationId,
       user_id,
@@ -130,14 +130,14 @@ const sendMessage = async (req, res) => {
       replyToMessageId || null
     );
 
-    // Fetch sender's username
+    // 2. Get sender username
     const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [user_id]
     );
     const username = senderRes.rows[0]?.username || "Unknown";
 
-    // Handle reply context (if any)
+    // 3. Optional: fetch reply info
     let replyToMessage = null;
     if (replyToMessageId) {
       const replyRes = await pool.query(
@@ -157,7 +157,7 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    // Update friendship timestamp (for DMs)
+    // 4. Update friendship timestamp
     const memberRes = await pool.query(
       `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
       [conversationId]
@@ -173,7 +173,7 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    // Emit real-time message to conversation
+    // 5. Emit the message
     const fullMessage = {
       message_id: message.message_id,
       conversation_id: conversationId,
@@ -185,19 +185,33 @@ const sendMessage = async (req, res) => {
     };
     getIO().to(conversationId).emit("receiveMessage", fullMessage);
 
-    // 🔔 Send notifications to all other members
+    // 6. 🔥 Send notification if NOT in same room
+    const io = getIO();
+    const room = io.sockets.adapter.rooms.get(conversationId); // Set of socket IDs
+    const socketsInRoom = room ? Array.from(room) : [];
+
     for (const member of memberRes.rows) {
       const targetId = member.user_id;
       if (targetId === user_id) continue;
 
-      await sendNotification(
-        targetId,
-        replyToMessageId ? "reply" : "message",
-        getDefaultNotificationContent(replyToMessageId ? "reply" : "message", {
-          senderName: username,
-        }),
-        `/chat/${conversationId}`
+      const targetSocketId = require("../../config/socket").getSocketIdByUserId(
+        targetId
       );
+      const isViewingRoom = socketsInRoom.includes(targetSocketId);
+
+      if (!isViewingRoom) {
+        await sendNotification(
+          targetId,
+          replyToMessageId ? "reply" : "message",
+          getDefaultNotificationContent(
+            replyToMessageId ? "reply" : "message",
+            {
+              senderName: username,
+            }
+          ),
+          `/chat/${conversationId}`
+        );
+      }
     }
 
     return res.status(201).json({ message: fullMessage });

@@ -100,9 +100,10 @@ const sendFriendRequest = async (req, res) => {
        VALUES ($1, $2)`,
       [senderId, receiverId]
     );
+
     // Notify receiver if online
     try {
-      const { getIO, getOnlineUsers } = require("../../socket");
+      const { getIO, getOnlineUsers } = require("../../config/socket");
       const io = getIO();
       const onlineUsers = getOnlineUsers();
 
@@ -123,6 +124,7 @@ const sendFriendRequest = async (req, res) => {
     } catch (err) {
       console.warn("⚠️ Failed to emit friendRequest notification:", err);
     }
+
     return res.status(200).json({ message: "Friend request sent" });
   } catch (err) {
     console.error("sendFriendRequest error:", err);
