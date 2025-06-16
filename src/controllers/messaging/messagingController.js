@@ -4,6 +4,12 @@ const ConversationMember = require("../../models/conversationMemberModel");
 const Message = require("../../models/messageModel");
 const pool = require("../../config/db");
 const { updateLastMessageTime } = require("../users/relationshipController");
+const { getUserWithRole } = require("../../models/userModel");
+const { getConversationById } = require("../../models/conversationModel");
+const { sendNotification } = require("../../services/notificationService");
+const {
+  getDefaultNotificationContent,
+} = require("../../utils/notificationHelpers");
 
 const createConversation = async (req, res) => {
   try {
@@ -74,11 +80,31 @@ const addMember = async (req, res) => {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
+    // 1. Add the new member to the DB
     await ConversationMember.addMemberToConversation(
       conversationId,
       newMemberId
     );
-    return res.status(200).json({ message: "Member added" });
+
+    // 2. Get convo name (for group context)
+    const convo = await getConversationById(conversationId);
+
+    // 3. Get sender username (optional but nice)
+    const senderInfo = await getUserWithRole(user_id);
+    const senderName = senderInfo?.username || "Someone";
+
+    // 4. Send notification
+    await sendNotification(
+      newMemberId,
+      "message",
+      getDefaultNotificationContent("message", {
+        senderName,
+        eventName: convo?.group_name || "a group chat",
+      }),
+      `/chat/${conversationId}`
+    );
+
+    return res.status(200).json({ message: "Member added and notified." });
   } catch (err) {
     console.error("addMember error:", err);
     return res.status(500).json({ error: "Failed to add member" });
@@ -96,6 +122,7 @@ const sendMessage = async (req, res) => {
         .json({ error: "Missing conversationId or content" });
     }
 
+    // Save message to DB
     const message = await Message.sendMessage(
       conversationId,
       user_id,
@@ -103,12 +130,14 @@ const sendMessage = async (req, res) => {
       replyToMessageId || null
     );
 
+    // Fetch sender's username
     const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [user_id]
     );
     const username = senderRes.rows[0]?.username || "Unknown";
 
+    // Handle reply context (if any)
     let replyToMessage = null;
     if (replyToMessageId) {
       const replyRes = await pool.query(
@@ -128,7 +157,7 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    // 🔄 Update last_message_time for 1-on-1 chats
+    // Update friendship timestamp (for DMs)
     const memberRes = await pool.query(
       `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
       [conversationId]
@@ -144,6 +173,7 @@ const sendMessage = async (req, res) => {
       }
     }
 
+    // Emit real-time message to conversation
     const fullMessage = {
       message_id: message.message_id,
       conversation_id: conversationId,
@@ -153,8 +183,23 @@ const sendMessage = async (req, res) => {
       sent_at: message.sent_at,
       reply_to_message: replyToMessage || undefined,
     };
-
     getIO().to(conversationId).emit("receiveMessage", fullMessage);
+
+    // 🔔 Send notifications to all other members
+    for (const member of memberRes.rows) {
+      const targetId = member.user_id;
+      if (targetId === user_id) continue;
+
+      await sendNotification(
+        targetId,
+        replyToMessageId ? "reply" : "message",
+        getDefaultNotificationContent(replyToMessageId ? "reply" : "message", {
+          senderName: username,
+        }),
+        `/chat/${conversationId}`
+      );
+    }
+
     return res.status(201).json({ message: fullMessage });
   } catch (err) {
     console.error("Send message error:", err);

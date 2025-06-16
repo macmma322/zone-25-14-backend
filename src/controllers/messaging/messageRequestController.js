@@ -7,6 +7,9 @@ const MessageRequest = require("../../models/MessageRequest");
 const Conversation = require("../../models/Conversation");
 const ConversationMember = require("../../models/ConversationMember");
 const Message = require("../../models/Message");
+const { sendNotification } = require("../../services/notificationService");
+const NotificationTypes = require("../../models/notificationTypes");
+
 
 const getIncomingRequests = async (req, res) => {
   try {

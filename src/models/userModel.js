@@ -1,4 +1,9 @@
 // src/models/userModel.js
+// Description: User model for handling user-related database operations
+// Functions: createUser, findUserByUsername, getUserWithRole
+// Dependencies: pg (PostgreSQL client), db configuration, encryption secret
+// This file is part of the Zone 25 project, which is licensed under the GNU General Public License v3.0.
+
 const pool = require("../config/db");
 const encryptionKey = process.env.ENCRYPTION_SECRET;
 
@@ -75,8 +80,15 @@ const getUserWithRole = async (userId) => {
   return rows[0];
 };
 
+const getUsernameById = async (userId) => {
+  const { rows } = await pool.query(`SELECT username FROM users WHERE user_id = $1`, [userId]);
+  return rows[0]?.username || "Unknown";
+};
+
+
 module.exports = {
   createUser,
   findUserByUsername,
   getUserWithRole,
+  getUsernameById,
 };

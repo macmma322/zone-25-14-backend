@@ -45,6 +45,8 @@ app.use("/api/roles", require("./src/routes/roles/rolesRoutes"));
 app.use("/api/messaging", require("./src/routes/messaging/messagingRoutes"));
 app.use("/api/reactions", require("./src/routes/messaging/reactionRoutes"));
 
+// ✅ Notifications route
+app.use("/api/notifications", require("./src/routes/notifications/notificationRoutes"));
 
 // ▪️ Root Route
 app.get("/", (req, res) => {
