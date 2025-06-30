@@ -1,6 +1,7 @@
 // Controller for handling message reactions
 // File: src/controllers/messaging/reactionController.js
 // Description: Contains functions to add reactions to messages and retrieve reactions by message or conversation
+
 const db = require("../../config/db");
 const { addReaction } = require("../../models/messageReactionModel");
 const { getIO, getSocketIdByUserId } = require("../../config/socket");
@@ -60,9 +61,8 @@ const toggleReactionController = async (req, res) => {
       });
     }
 
-    // 🔔 Smart Notification
+    // 🔔 Smart Notification for non-room members
     if (type === "add" && conversationId) {
-      // Get other members
       const memberRes = await db.query(
         `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
         [conversationId]
@@ -102,8 +102,6 @@ const toggleReactionController = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
-
-const pool = require("../../config/db");
 
 // GET /api/reactions?messageId=abc
 const getReactionsByMessage = async (req, res) => {

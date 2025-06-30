@@ -1,7 +1,7 @@
 const pool = require("../../config/db"); // Adjust the path as necessary
 
 // ▪️ Add Item to Cart
-exports.addToCart = async (req, res) => {
+const addToCart = async (req, res) => {
   try {
     const { product_variation_id, quantity } = req.body;
     const userId = req.user.userId;
@@ -41,7 +41,7 @@ exports.addToCart = async (req, res) => {
 };
 
 // ▪️ Get User's Cart
-exports.getCart = async (req, res) => {
+const getCart = async (req, res) => {
   try {
     const userId = req.user.userId;
 
@@ -79,9 +79,8 @@ exports.getCart = async (req, res) => {
   }
 };
 
-
 // ▪️ Update Cart Item Quantity
-exports.updateCartItem = async (req, res) => {
+const updateCartItem = async (req, res) => {
   try {
     const { itemId } = req.params;
     const { quantity } = req.body;
@@ -108,7 +107,7 @@ exports.updateCartItem = async (req, res) => {
 };
 
 // ▪️ Remove Item from Cart
-exports.removeCartItem = async (req, res) => {
+const removeCartItem = async (req, res) => {
   try {
     const { itemId } = req.params;
     const userId = req.user.userId;
@@ -127,4 +126,11 @@ exports.removeCartItem = async (req, res) => {
     console.error("Remove Cart Item Error:", error.message);
     res.status(500).json({ message: "Server error." });
   }
+};
+
+module.exports = {
+  addToCart,
+  getCart,
+  updateCartItem,
+  removeCartItem,
 };
