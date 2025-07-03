@@ -71,16 +71,21 @@ const toggleReactionController = async (req, res) => {
       const room = io.sockets.adapter.rooms.get(conversationId); // Set of socket IDs
       const socketsInRoom = room ? Array.from(room) : [];
 
-      for (const member of memberRes.rows) {
-        const targetId = member.user_id;
-        if (targetId === user_id) continue;
+      // 🧠 First get the message's real sender
+      const messageRes = await db.query(
+        `SELECT sender_id FROM messages WHERE message_id = $1`,
+        [message_id]
+      );
+      const messageSenderId = messageRes.rows[0]?.sender_id;
 
-        const socketId = getSocketIdByUserId(targetId);
+      // 🔄 Notify only the original sender (not yourself) and only if they're not in the room
+      if (messageSenderId && messageSenderId !== user_id) {
+        const socketId = getSocketIdByUserId(messageSenderId);
         const isInRoom = socketsInRoom.includes(socketId);
 
         if (!isInRoom) {
           await sendNotification(
-            targetId,
+            messageSenderId,
             "reaction",
             getDefaultNotificationContent("reaction", { senderName: username }),
             `/chat/${conversationId}`

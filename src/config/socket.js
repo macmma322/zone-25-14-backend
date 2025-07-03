@@ -3,19 +3,21 @@
 // Dependencies: Socket.IO, PostgreSQL client, online user tracking
 // This file is part of the Zone 25 project, which is licensed under the GNU General Public License v3.0.
 
+// ─────────────────────────────────────────────
+const pool = require("./db");
+const jwt = require("jsonwebtoken");
+
 let ioInstance;
 const onlineUsers = {}; // Maps user_id → socket.id
 
-const pool = require("./db");
-
 module.exports = {
-  // 🔌 Initialize Socket.IO server
+  // 🔌 Initialize the Socket.IO server
   initSocket(server) {
     const { Server } = require("socket.io");
 
     ioInstance = new Server(server, {
       cors: {
-        origin: "http://localhost:3000", // change in production
+        origin: "http://localhost:3000", // ⚠️ update in prod
         credentials: true,
       },
     });
@@ -23,14 +25,28 @@ module.exports = {
     ioInstance.on("connection", (socket) => {
       console.log(`📡 Socket connected: ${socket.id}`);
 
-      const userId = socket.handshake.auth?.userId;
-      if (userId) {
-        onlineUsers[userId] = socket.id;
-        console.log(`✅ User ${userId} is now online`);
-        broadcastPresenceToFriends(userId, "online");
+      try {
+        // 🍪 Extract JWT token from cookies
+        const cookie = socket.handshake.headers.cookie || "";
+        const match = cookie.match(/authToken=([^;]+)/);
+
+        if (match) {
+          const token = match[1];
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          const userId = decoded.user_id;
+
+          if (userId) {
+            socket.userId = userId; // 🔒 store on socket
+            onlineUsers[userId] = socket.id;
+            console.log(`✅ User ${userId} is now online`);
+            broadcastPresenceToFriends(userId, "online");
+          }
+        }
+      } catch (err) {
+        console.warn("⚠️ Socket auth error:", err.message);
       }
 
-      // ✅ Join conversation room
+      // 👥 Join chat room
       socket.on("joinRoom", (conversationId) => {
         socket.join(conversationId);
         console.log(`👥 Socket ${socket.id} joined room ${conversationId}`);
@@ -41,15 +57,16 @@ module.exports = {
         socket.to(conversationId).emit("showTyping", sender);
       });
 
-      // 🔁 Reactions (already covered in controller too)
+      // 🔁 Emoji reactions
       socket.on("sendReactionUpdate", ({ conversationId, data }) => {
         if (!conversationId || !data) return;
         socket.to(conversationId).emit("reactionUpdated", data);
       });
 
-      // ❌ Disconnection
+      // ❌ Disconnect cleanup
       socket.on("disconnect", () => {
         console.log(`❌ Disconnected: ${socket.id}`);
+        const userId = socket.userId;
         if (userId) {
           delete onlineUsers[userId];
           broadcastPresenceToFriends(userId, "offline");
@@ -60,7 +77,7 @@ module.exports = {
     return ioInstance;
   },
 
-  // 📤 Emit from backend
+  // 📤 Emit access for controllers/services
   getIO() {
     if (!ioInstance) {
       throw new Error("Socket.IO not initialized");
@@ -68,18 +85,19 @@ module.exports = {
     return ioInstance;
   },
 
-  // 👥 All online users
+  // 🔍 Get all current online users
   getOnlineUsers() {
     return onlineUsers;
   },
 
-  // 📡 Used by notificationService
+  // 🔎 Get specific socket ID by user
   getSocketIdByUserId(userId) {
     return onlineUsers[userId] || null;
   },
 };
 
-// 🔄 Broadcast presence changes to friends
+// ─────────────────────────────────────────────
+// 🔄 Notify friends when someone goes online/offline
 async function broadcastPresenceToFriends(userId, status) {
   try {
     const result = await pool.query(
@@ -89,13 +107,14 @@ async function broadcastPresenceToFriends(userId, status) {
     );
 
     const friends = result.rows.map((r) => r.friend_id);
-    friends.forEach((fid) => {
-      const socketId = onlineUsers[fid];
+
+    friends.forEach((friendId) => {
+      const socketId = onlineUsers[friendId];
       if (socketId) {
         ioInstance.to(socketId).emit("presence", { userId, status });
       }
     });
   } catch (err) {
-    console.error("❗Presence broadcast error:", err);
+    console.error("❗ Presence broadcast error:", err);
   }
 }

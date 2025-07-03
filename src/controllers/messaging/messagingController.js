@@ -1,3 +1,9 @@
+// This file is part of the Zone 25-14 project.
+// Licensed under the GNU General Public License v3.0.
+// Description: Messaging controller for handling conversations, messages, and members
+// Functions: createConversation, addMember, sendMessage, getMessages
+// Dependencies: Conversation, ConversationMember, Message models, socket.io, notification service
+
 const { getIO } = require("../../config/socket.js");
 const Conversation = require("../../models/conversationModel");
 const ConversationMember = require("../../models/conversationMemberModel");

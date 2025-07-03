@@ -1,3 +1,10 @@
+// File: zone-25-14-backend/src/controllers/messaging/messageRequestController.js
+// This file is part of the Zone 25-14 project.
+// Licensed under the GNU General Public License v3.0.
+// Description: Handles incoming message requests, accepting or declining them
+// Functions: getIncomingRequests, acceptMessageRequest, declineMessageRequest
+// Dependencies: MessageRequest, Conversation, ConversationMember, Message models, notification service
+
 const pool = require("../../config/db");
 const MessageRequest = require("../../models/MessageRequest");
 const Conversation = require("../../models/Conversation");
