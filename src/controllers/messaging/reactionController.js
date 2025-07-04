@@ -25,13 +25,11 @@ const toggleReactionController = async (req, res) => {
     let reactionData = null;
 
     if (existing.rows.length > 0) {
-      // ❌ Already reacted — remove
       await db.query(`DELETE FROM message_reactions WHERE reaction_id = $1`, [
         existing.rows[0].reaction_id,
       ]);
       type = "remove";
     } else {
-      // ✅ Not reacted — add
       const insertResult = await db.query(
         `INSERT INTO message_reactions (user_id, message_id, reaction)
          VALUES ($1, $2, $3)
@@ -49,8 +47,9 @@ const toggleReactionController = async (req, res) => {
     );
     const conversationId = convoResult.rows[0]?.conversation_id;
 
-    // 📡 Real-time emit to room
     const io = getIO();
+
+    // 📡 Broadcast to conversation room
     if (conversationId && type) {
       io.to(conversationId).emit("reactionUpdated", {
         message_id,
@@ -61,50 +60,52 @@ const toggleReactionController = async (req, res) => {
       });
     }
 
-    // 🔔 Smart Notification for non-room members
+    // 🔔 Notify only original message sender (smart)
     if (type === "add" && conversationId) {
-      const memberRes = await db.query(
-        `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      const room = io.sockets.adapter.rooms.get(conversationId); // Set of socket IDs
-      const socketsInRoom = room ? Array.from(room) : [];
-
-      // 🧠 First get the message's real sender
-      const messageRes = await db.query(
+      const msgSenderRes = await db.query(
         `SELECT sender_id FROM messages WHERE message_id = $1`,
         [message_id]
       );
-      const messageSenderId = messageRes.rows[0]?.sender_id;
+      const messageSenderId = msgSenderRes.rows[0]?.sender_id;
 
-      // 🔄 Notify only the original sender (not yourself) and only if they're not in the room
-      if (messageSenderId && messageSenderId !== user_id) {
-        const socketId = getSocketIdByUserId(messageSenderId);
-        const isInRoom = socketsInRoom.includes(socketId);
-
-        if (!isInRoom) {
-          await sendNotification(
-            messageSenderId,
-            "reaction",
-            getDefaultNotificationContent("reaction", { senderName: username }),
-            `/chat/${conversationId}`
+      // Skip self-reaction or missing data
+      if (!messageSenderId || messageSenderId === user_id) {
+        return res
+          .status(200)
+          .json(
+            type === "remove"
+              ? { removed: true, emoji: reaction }
+              : { reaction: reactionData }
           );
-        }
+      }
+
+      // Check if target is in room
+      const socketId = await getSocketIdByUserId(messageSenderId);
+      const room = io.sockets.adapter.rooms.get(conversationId);
+      const socketsInRoom = room ? Array.from(room) : [];
+      const isInRoom = socketId && socketsInRoom.includes(socketId);
+
+      if (!isInRoom) {
+        await sendNotification(
+          messageSenderId,
+          "reaction",
+          getDefaultNotificationContent("reaction", { senderName: username }),
+          `/chat/${conversationId}`
+        );
       }
     }
 
-    // ✅ Respond
+    // ✅ Final Response
     if (type === "remove") {
-      res.status(200).json({ removed: true, emoji: reaction });
+      return res.status(200).json({ removed: true, emoji: reaction });
     } else if (type === "add" && reactionData) {
-      res.status(200).json({ reaction: reactionData });
+      return res.status(200).json({ reaction: reactionData });
     } else {
-      res.status(200).json({ success: true });
+      return res.status(200).json({ success: true });
     }
   } catch (err) {
     console.error("❌ Reaction DB error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
