@@ -200,10 +200,10 @@ const sendMessage = async (req, res) => {
       const targetId = member.user_id;
       if (targetId === user_id) continue;
 
-      const targetSocketId = require("../../config/socket").getSocketIdByUserId(
-        targetId
-      );
-      const isViewingRoom = socketsInRoom.includes(targetSocketId);
+      const targetSocketId =
+        await require("../../config/socket").getSocketIdByUserId(targetId);
+      const isViewingRoom =
+        targetSocketId && socketsInRoom.includes(targetSocketId);
 
       if (!isViewingRoom) {
         await sendNotification(

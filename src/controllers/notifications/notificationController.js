@@ -9,11 +9,17 @@ const {
 } = require("../../utils/notificationHelpers");
 
 // 🔔 Emit helper
-const emitNotificationIfOnline = (userId, notification) => {
-  const socketId = getSocketIdByUserId(userId);
-  if (socketId) {
-    getIO().to(socketId).emit("notification", notification);
-    console.log("📨 Emitted notification to socket:", socketId);
+const emitNotificationIfOnline = async (userId, notification) => {
+  try {
+    const socketId = await getSocketIdByUserId(userId);
+    if (socketId) {
+      getIO().to(socketId).emit("notification", notification);
+      console.log("📨 Emitted notification to socket:", socketId);
+    } else {
+      console.log("🔕 User is offline — notification stored only in DB");
+    }
+  } catch (err) {
+    console.error("❌ emitNotificationIfOnline error:", err.message);
   }
 };
 
@@ -43,7 +49,7 @@ const createNotification = async (req, res) => {
     );
 
     const notification = result.rows[0];
-    emitNotificationIfOnline(user_id, notification);
+    await emitNotificationIfOnline(user_id, notification);
 
     res.status(201).json(notification);
   } catch (err) {

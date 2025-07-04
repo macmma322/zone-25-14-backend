@@ -1,75 +1,76 @@
 // File: src/config/socket.js
-// Description: Manages Socket.IO instance, presence, and real-time features
-// Dependencies: Socket.IO, PostgreSQL client, online user tracking
+// Description: Manages Socket.IO instance, presence (now via Redis), and real-time features
+// Dependencies: Socket.IO, Redis, PostgreSQL
 // This file is part of the Zone 25 project, which is licensed under the GNU General Public License v3.0.
 
 // ─────────────────────────────────────────────
 const pool = require("./db");
 const jwt = require("jsonwebtoken");
+const redis = require("./redis");
+const presenceService = require("../services/presenceService");
 
 let ioInstance;
-const onlineUsers = {}; // Maps user_id → socket.id
 
 module.exports = {
-  // 🔌 Initialize the Socket.IO server
   initSocket(server) {
     const { Server } = require("socket.io");
 
     ioInstance = new Server(server, {
       cors: {
-        origin: "http://localhost:3000", // ⚠️ update in prod
+        origin: "http://localhost:3000",
         credentials: true,
       },
     });
 
-    ioInstance.on("connection", (socket) => {
+    ioInstance.on("connection", async (socket) => {
       console.log(`📡 Socket connected: ${socket.id}`);
 
       try {
-        // 🍪 Extract JWT token from cookies
         const cookie = socket.handshake.headers.cookie || "";
         const match = cookie.match(/authToken=([^;]+)/);
 
         if (match) {
           const token = match[1];
+          console.log("🍪 Incoming authToken cookie:", token);
+
           const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          console.log("🔐 Token valid:", decoded);
+
           const userId = decoded.user_id;
 
           if (userId) {
-            socket.userId = userId; // 🔒 store on socket
-            onlineUsers[userId] = socket.id;
-            console.log(`✅ User ${userId} is now online`);
-            broadcastPresenceToFriends(userId, "online");
+            socket.userId = userId;
+            await presenceService.setUserOnline(userId);
+            await redis.set(`presence:${userId}`, socket.id);
+            await redis.expire(`presence:${userId}`, 300); // 5 minutes expiry
+            await broadcastPresenceToFriends(userId, "online");
           }
         }
       } catch (err) {
         console.warn("⚠️ Socket auth error:", err.message);
       }
 
-      // 👥 Join chat room
       socket.on("joinRoom", (conversationId) => {
         socket.join(conversationId);
         console.log(`👥 Socket ${socket.id} joined room ${conversationId}`);
       });
 
-      // ✍️ Typing indicator
       socket.on("typing", ({ conversationId, sender }) => {
         socket.to(conversationId).emit("showTyping", sender);
       });
 
-      // 🔁 Emoji reactions
       socket.on("sendReactionUpdate", ({ conversationId, data }) => {
         if (!conversationId || !data) return;
         socket.to(conversationId).emit("reactionUpdated", data);
       });
 
-      // ❌ Disconnect cleanup
-      socket.on("disconnect", () => {
+      socket.on("disconnect", async () => {
         console.log(`❌ Disconnected: ${socket.id}`);
         const userId = socket.userId;
         if (userId) {
-          delete onlineUsers[userId];
-          broadcastPresenceToFriends(userId, "offline");
+          await redis.del(`presence:${userId}`);
+          await presenceService.setUserOffline(userId);
+          await broadcastPresenceToFriends(userId, "offline");
         }
       });
     });
@@ -77,7 +78,6 @@ module.exports = {
     return ioInstance;
   },
 
-  // 📤 Emit access for controllers/services
   getIO() {
     if (!ioInstance) {
       throw new Error("Socket.IO not initialized");
@@ -85,19 +85,16 @@ module.exports = {
     return ioInstance;
   },
 
-  // 🔍 Get all current online users
-  getOnlineUsers() {
-    return onlineUsers;
+  async getOnlineUsers() {
+    const keys = await redis.keys("presence:*");
+    return keys.map((key) => key.split(":")[1]);
   },
 
-  // 🔎 Get specific socket ID by user
-  getSocketIdByUserId(userId) {
-    return onlineUsers[userId] || null;
+  async getSocketIdByUserId(userId) {
+    return await redis.get(`presence:${userId}`);
   },
 };
 
-// ─────────────────────────────────────────────
-// 🔄 Notify friends when someone goes online/offline
 async function broadcastPresenceToFriends(userId, status) {
   try {
     const result = await pool.query(
@@ -106,14 +103,23 @@ async function broadcastPresenceToFriends(userId, status) {
       [userId]
     );
 
-    const friends = result.rows.map((r) => r.friend_id);
+    const lastSeen =
+      status === "offline" ? await presenceService.getLastSeen(userId) : null;
 
-    friends.forEach((friendId) => {
-      const socketId = onlineUsers[friendId];
+    const friends = result.rows.map((r) => r.friend_id);
+    console.log("📢 Broadcasting to:", friends);
+    console.log("🎯 Sending status for:", userId, status);
+
+    for (const friendId of friends) {
+      const socketId = await redis.get(`presence:${friendId}`);
       if (socketId) {
-        ioInstance.to(socketId).emit("presence", { userId, status });
+        ioInstance.to(socketId).emit("presence", {
+          userId,
+          status,
+          lastSeen,
+        });
       }
-    });
+    }
   } catch (err) {
     console.error("❗ Presence broadcast error:", err);
   }

@@ -285,6 +285,8 @@ const updateLastMessageTime = async (userId, friendId) => {
   }
 };
 
+const redis = require("../../config/redis");
+
 const getFriendsList = async (req, res) => {
   const userId = req.user.user_id;
   const { offset = 0, limit = 20 } = req.query;
@@ -308,12 +310,24 @@ const getFriendsList = async (req, res) => {
       [userId, limit, offset]
     );
 
+    // 🔄 Inject Redis-based presence
+    for (let friend of result.rows) {
+      const [isOnline, lastSeen] = await Promise.all([
+        redis.sismember("online_users", friend.friend_id),
+        redis.hget("user_last_seen", friend.friend_id),
+      ]);
+
+      friend.is_online = isOnline === 1;
+      friend.last_seen = lastSeen;
+    }
+
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error("getFriendsList error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 
 module.exports = {
   getRelationshipStatus,
