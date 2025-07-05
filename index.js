@@ -1,72 +1,46 @@
-// Zone 25-14 Backend API (index.js)
-// Main entry point for the Zone 25-14 backend API with Socket.IO support
+// 🧠 Zone 25-14 Backend – Main Server Entry Point
+// Loads environment, middlewares, routes, PostgreSQL, and Socket.IO
 
 require("dotenv").config({ path: "./src/.env" });
+
 const express = require("express");
 const http = require("http");
-const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const rateLimit = require("express-rate-limit");
+
 const pool = require("./src/config/db.js");
 const { initSocket } = require("./src/config/socket.js");
+const loadMiddlewares = require("./src/config/loadMiddleware");
+const loadRoutes = require("./src/config/loadRoutes");
 
 const app = express();
 const server = http.createServer(app);
 
-// ▪️ Middleware
-app.use(express.json());
-app.use(cookieParser());
+//////////////////////////////////////////////////
+// ▪️ Load All Middlewares
+//////////////////////////////////////////////////
+loadMiddlewares(app);
 
-app.use(
-  cors({
-    origin: "http://localhost:3000",
-    credentials: true,
-  })
-);
+//////////////////////////////////////////////////
+// ▪️ Load All API Routes
+//////////////////////////////////////////////////
+loadRoutes(app);
 
-// Apply rate limiting to the API
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per `windowMs`
-    message: "Too many requests from this IP, please try again later.",
-  })
-);
-
-// ▪️ API Routes
-app.use("/api/auth", require("./src/routes/auth/authRoutes"));
-app.use("/api/users", require("./src/routes/users/usersRoutes"));
-app.use("/api/users", require("./src/routes/users/relationshipRoutes"));
-app.use("/api/points", require("./src/routes/points/pointsRoutes"));
-app.use("/api/orders", require("./src/routes/orders/orderRoutes"));
-app.use("/api", require("./src/routes/products/productRoutes"));
-app.use("/api", require("./src/routes/cart/cartRoutes"));
-app.use("/api", require("./src/routes/wishlist/wishlistRoutes"));
-app.use("/api", require("./src/routes/subscriptions/subscriptionRoutes"));
-app.use("/api/roles", require("./src/routes/roles/rolesRoutes"));
-app.use("/api/messaging", require("./src/routes/messaging/messagingRoutes"));
-app.use("/api/reactions", require("./src/routes/messaging/reactionRoutes"));
-
-// ✅ Notifications route
-app.use(
-  "/api/notifications",
-  require("./src/routes/notifications/notificationRoutes")
-);
-
-// ▪️ Root Route
+//////////////////////////////////////////////////
+// ▪️ Root Route (Health Check)
+//////////////////////////////////////////////////
 app.get("/", (req, res) => {
   res.send("🔥 Welcome to Zone 25-14 API");
 });
 
-// ▪️ Database + Socket + Server Startup
+//////////////////////////////////////////////////
+// ▪️ Database + Socket.IO + Server Init
+//////////////////////////////////////////////////
 pool
   .connect()
   .then((client) => {
     console.log("✅ Connected to PostgreSQL Database");
-    client.release();
+    client.release(); // Always release back to pool
 
-    // Initialize Socket.IO
-    initSocket(server); // ✅ no circular dependency now
+    initSocket(server); // WebSocket live features
 
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
