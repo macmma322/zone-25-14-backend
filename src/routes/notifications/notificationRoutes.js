@@ -17,16 +17,25 @@ const {
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
+  deleteAllNotifications,
+  deleteMultipleNotifications,
+  updateNotificationStatus,
 } = require("../../controllers/notifications/notificationController");
 
-// 🛠 Define routes (ORDER MATTERS)
+// 🔔 CREATE
 router.post("/", protectRoute, createNotification);
+
+// 📥 FETCH
 router.get("/", protectRoute, getUserNotifications);
 
-// ✅ Place this ABOVE `/:id` to avoid conflict
+// ✅ UPDATE
 router.patch("/mark-all", protectRoute, markAllNotificationsRead);
-
 router.patch("/:id", protectRoute, markNotificationRead);
-router.delete("/:id", protectRoute, deleteNotification);
+router.post("/:id/status", protectRoute, updateNotificationStatus); // Optional route for status
+
+// 🗑️ DELETE
+router.delete("/clear-all", protectRoute, deleteAllNotifications);
+router.post("/clear-selected", protectRoute, deleteMultipleNotifications);
+router.delete("/:id", protectRoute, deleteNotification); // ❗️Placed last to avoid conflicts
 
 module.exports = router;

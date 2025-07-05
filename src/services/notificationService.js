@@ -17,7 +17,6 @@ const sendNotification = async (
   data = {}
 ) => {
   try {
-    // 🔍 Debug logs
     console.log("📨 sendNotification called with:", {
       userId,
       type,
@@ -26,7 +25,6 @@ const sendNotification = async (
       data,
     });
 
-    // ❌ Validate inputs
     if (!userId) throw new Error("❌ Missing target userId.");
     if (!type || typeof type !== "string")
       throw new Error("❌ Notification type is undefined.");
@@ -34,20 +32,21 @@ const sendNotification = async (
       throw new Error(`❌ Invalid notification type: ${type}`);
     }
 
-    // 📝 Auto-generate content if not provided
     const finalContent =
       content || getDefaultNotificationContent(type, data || {});
 
     const result = await pool.query(
-      `INSERT INTO notifications (user_id, type, content, is_read, created_at, link)
-       VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4)
+      `INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data)
+       VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5)
        RETURNING *`,
-      [userId, type, finalContent, link || null]
+      [userId, type, finalContent, link || null, JSON.stringify(data || {})]
     );
 
     const notification = result.rows[0];
 
-    // 📡 Emit via socket if user is online
+    // Parse back to object before emitting
+    notification.data = data;
+
     const socketId = await getSocketIdByUserId(userId);
     if (socketId) {
       const io = getIO();
@@ -60,8 +59,28 @@ const sendNotification = async (
     return notification;
   } catch (err) {
     console.error("❌ Failed to send notification:", err);
-    throw err; // Re-throw so caller can also catch
+    throw err;
   }
 };
 
-module.exports = { sendNotification };
+async function updateNotificationStatusByRequestId(requestId, status) {
+  try {
+    const result = await pool.query(
+      `UPDATE notifications
+       SET data = jsonb_set(data, '{status}', $2::jsonb, true)
+       WHERE data->>'requestId' = $1`,
+      [requestId, JSON.stringify(status)]
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error(`❌ No notification found with requestId: ${requestId}`);
+    }
+
+    return true;
+  } catch (err) {
+    console.error("❌ Error updating notification status:", err);
+    throw err;
+  }
+}
+
+module.exports = { sendNotification, updateNotificationStatusByRequestId };

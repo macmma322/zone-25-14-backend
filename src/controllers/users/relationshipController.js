@@ -1,4 +1,19 @@
+// zone-25-14-backend/src/controllers/users/relationshipController.js
+// Description: Handles user relationships like friend requests, status, and friend management
+// Functions: getRelationshipStatus, sendFriendRequest, cancelFriendRequest,
+//            acceptFriendRequest, declineFriendRequest, togglePinnedFriend,
+//            resetUnreadCount, updateLastMessageTime, getFriendsList
+// Dependencies: Express, PostgreSQL, Redis, Notification Service
+
 const pool = require("../../config/db");
+const {
+  sendNotification,
+  updateNotificationStatusByRequestId,
+} = require("../../services/notificationService");
+const {
+  getDefaultNotificationContent,
+} = require("../../utils/notificationHelpers");
+const redis = require("../../config/redis");
 
 // ✅ GET Relationship Status
 const getRelationshipStatus = async (req, res) => {
@@ -95,35 +110,29 @@ const sendFriendRequest = async (req, res) => {
     if (existing.rows.length > 0)
       return res.status(400).json({ error: "Request already sent" });
 
-    await pool.query(
+    const insertRes = await pool.query(
       `INSERT INTO friend_requests (sender_id, receiver_id)
-       VALUES ($1, $2)`,
+   VALUES ($1, $2)
+   RETURNING request_id`,
       [senderId, receiverId]
     );
 
-    // Notify receiver if online
-    try {
-      const { getIO, getOnlineUsers } = require("../../config/socket");
-      const io = getIO();
-      const onlineUsers = getOnlineUsers();
+    const requestId = insertRes.rows[0].request_id;
 
-      const receiverSocket = onlineUsers[receiverId];
+    // 🔔 Save to DB and Emit via Notification System
+    const senderRes = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [senderId]
+    );
+    const senderUsername = senderRes.rows[0]?.username ?? "Someone";
 
-      if (receiverSocket) {
-        const senderRes = await pool.query(
-          `SELECT username FROM users WHERE user_id = $1`,
-          [senderId]
-        );
-        const senderUsername = senderRes.rows[0]?.username ?? "Someone";
-
-        io.to(receiverSocket).emit("friendRequest", {
-          from: senderId,
-          username: senderUsername,
-        });
-      }
-    } catch (err) {
-      console.warn("⚠️ Failed to emit friendRequest notification:", err);
-    }
+    await sendNotification(
+      receiverId,
+      "friend",
+      getDefaultNotificationContent("friend", { senderName: senderUsername }),
+      `/profile/${senderUsername}`,
+      { requestId, status: "pending" } // 👈 this enables frontend buttons
+    );
 
     return res.status(200).json({ message: "Friend request sent" });
   } catch (err) {
@@ -166,6 +175,69 @@ const acceptFriendRequest = async (req, res) => {
   const { requestId } = req.body;
 
   try {
+    console.log("🔍 Accepting friend request:", requestId);
+
+    const reqRes = await pool.query(
+      `SELECT sender_id FROM friend_requests
+       WHERE request_id = $1 AND receiver_id = $2 AND status = 'pending'`,
+      [requestId, receiverId]
+    );
+    if (!reqRes.rows.length) {
+      console.log("⚠️ Friend request not found or already handled.");
+      return res.status(404).json({ error: "Request not found" });
+    }
+
+    const senderId = reqRes.rows[0].sender_id;
+
+    console.log(
+      "👥 Accepting friendship between:",
+      senderId,
+      "<->",
+      receiverId
+    );
+
+    await pool.query(
+      `UPDATE friend_requests SET status = 'accepted' WHERE request_id = $1`,
+      [requestId]
+    );
+
+    await updateNotificationStatusByRequestId(requestId, "accepted");
+
+    await pool.query(
+      `INSERT INTO friends (user_id, friend_id)
+       VALUES ($1, $2), ($2, $1)
+       ON CONFLICT DO NOTHING`,
+      [senderId, receiverId]
+    );
+
+    console.log("✅ Friendship saved to database");
+
+    const receiverRes = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [receiverId]
+    );
+    const receiverUsername = receiverRes.rows[0]?.username ?? "Someone";
+
+    await sendNotification(
+      senderId,
+      "friend",
+      `${receiverUsername} accepted your friend request.`,
+      `/profile/${receiverUsername}`
+    );
+
+    return res.status(200).json({ message: "Friend request accepted" });
+  } catch (err) {
+    console.error("❌ acceptFriendRequest error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// ✅ DECLINE Friend Request
+const declineFriendRequest = async (req, res) => {
+  const receiverId = req.user.user_id;
+  const { requestId } = req.body;
+
+  try {
     const reqRes = await pool.query(
       `SELECT sender_id FROM friend_requests
        WHERE request_id = $1 AND receiver_id = $2 AND status = 'pending'`,
@@ -177,33 +249,23 @@ const acceptFriendRequest = async (req, res) => {
     const senderId = reqRes.rows[0].sender_id;
 
     await pool.query(
-      `UPDATE friend_requests SET status = 'accepted' WHERE request_id = $1`,
-      [requestId]
-    );
-
-    await pool.query(
-      `INSERT INTO friends (user_id, friend_id)
-       VALUES ($1, $2), ($2, $1)`,
-      [senderId, receiverId]
-    );
-
-    return res.status(200).json({ message: "Friend request accepted" });
-  } catch (err) {
-    console.error("acceptFriendRequest error:", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-};
-
-// ✅ DECLINE Friend Request
-const declineFriendRequest = async (req, res) => {
-  const receiverId = req.user.user_id;
-  const { requestId } = req.body;
-
-  try {
-    await pool.query(
       `UPDATE friend_requests SET status = 'declined'
        WHERE request_id = $1 AND receiver_id = $2`,
       [requestId, receiverId]
+    );
+
+    await updateNotificationStatusByRequestId(requestId, "declined");
+
+    const receiverRes = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [receiverId]
+    );
+    const receiverUsername = receiverRes.rows[0]?.username ?? "Someone";
+
+    await sendNotification(
+      senderId,
+      "friend",
+      `${receiverUsername} declined your friend request.`
     );
 
     return res.status(200).json({ message: "Friend request declined" });
@@ -285,8 +347,7 @@ const updateLastMessageTime = async (userId, friendId) => {
   }
 };
 
-const redis = require("../../config/redis");
-
+// ✅ GET Friends List
 const getFriendsList = async (req, res) => {
   const userId = req.user.user_id;
   const { offset = 0, limit = 20 } = req.query;
@@ -327,7 +388,6 @@ const getFriendsList = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
-
 
 module.exports = {
   getRelationshipStatus,
