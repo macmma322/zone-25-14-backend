@@ -13,6 +13,10 @@ module.exports = {
     await redis.hdel(LAST_SEEN_KEY, userId); // Clear old last_seen
   },
 
+  async getOnlineUserIds() {
+    return await redis.smembers(ONLINE_KEY);
+  },
+
   async setUserOffline(userId) {
     await redis.srem(ONLINE_KEY, userId);
     await redis.hset(LAST_SEEN_KEY, userId, new Date().toISOString());

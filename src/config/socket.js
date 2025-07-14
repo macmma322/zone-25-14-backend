@@ -64,6 +64,16 @@ module.exports = {
         socket.to(conversationId).emit("reactionUpdated", data);
       });
 
+      socket.on("reconnect", async () => {
+        console.log("🔁 Socket reconnected");
+        try {
+          await presenceService.setUserOnline(socket.userId);
+          await broadcastPresenceToFriends(socket.userId, "online");
+        } catch (err) {
+          console.error("Reconnect presence error:", err);
+        }
+      });
+
       socket.on("disconnect", async () => {
         console.log(`❌ Disconnected: ${socket.id}`);
         const userId = socket.userId;
