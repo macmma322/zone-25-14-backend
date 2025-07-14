@@ -12,6 +12,7 @@ const {
 } = require("../../services/notificationService");
 const {
   getDefaultNotificationContent,
+  generateAdditionalInfo,
 } = require("../../utils/notificationHelpers");
 const redis = require("../../config/redis");
 
@@ -25,12 +26,10 @@ const getRelationshipStatus = async (req, res) => {
       `SELECT user_id FROM users WHERE username = $1`,
       [username]
     );
-    if (!userRes.rows.length) {
+    if (!userRes.rows.length)
       return res.status(404).json({ error: "User not found" });
-    }
 
     const targetId = userRes.rows[0].user_id;
-
     if (viewerId === targetId) {
       return res.status(200).json({
         targetId,
@@ -42,22 +41,15 @@ const getRelationshipStatus = async (req, res) => {
     }
 
     const friendRes = await pool.query(
-      `SELECT 1 FROM friends
-       WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))
-         AND is_removed = false AND is_blocked = false`,
+      `SELECT 1 FROM friends WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)) AND is_removed = false AND is_blocked = false`,
       [viewerId, targetId]
     );
     const areFriends = friendRes.rows.length > 0;
 
     const requestRes = await pool.query(
-      `SELECT request_id, sender_id, receiver_id
-       FROM friend_requests
-       WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
-         AND status = 'pending'
-       LIMIT 1`,
+      `SELECT request_id, sender_id, receiver_id FROM friend_requests WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND status = 'pending' LIMIT 1`,
       [viewerId, targetId]
     );
-
     const request = requestRes.rows[0];
     const hasPendingFriendRequest = !!request;
     const theySentRequest = request?.sender_id === targetId;
@@ -91,7 +83,6 @@ const sendFriendRequest = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
 
     const receiverId = userRes.rows[0].user_id;
-
     if (senderId === receiverId)
       return res.status(400).json({ error: "Cannot friend yourself" });
 
@@ -103,35 +94,59 @@ const sendFriendRequest = async (req, res) => {
       return res.status(400).json({ error: "Already friends" });
 
     const existing = await pool.query(
-      `SELECT 1 FROM friend_requests
-       WHERE sender_id = $1 AND receiver_id = $2 AND status = 'pending'`,
+      `SELECT 1 FROM friend_requests WHERE sender_id = $1 AND receiver_id = $2 AND status = 'pending'`,
       [senderId, receiverId]
     );
     if (existing.rows.length > 0)
       return res.status(400).json({ error: "Request already sent" });
 
     const insertRes = await pool.query(
-      `INSERT INTO friend_requests (sender_id, receiver_id)
-   VALUES ($1, $2)
-   RETURNING request_id`,
+      `INSERT INTO friend_requests (sender_id, receiver_id) VALUES ($1, $2) RETURNING request_id`,
       [senderId, receiverId]
     );
-
     const requestId = insertRes.rows[0].request_id;
 
-    // 🔔 Save to DB and Emit via Notification System
     const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [senderId]
     );
     const senderUsername = senderRes.rows[0]?.username ?? "Someone";
 
+    // 🧠 Get mutual friend usernames (limit to 10)
+    const mutualFriendsRes = await pool.query(
+      `SELECT u.user_id, u.username, u.profile_picture
+      FROM friends f1
+      JOIN friends f2 ON f1.friend_id = f2.friend_id
+      JOIN users u ON u.user_id = f1.friend_id
+      WHERE f1.user_id = $1 AND f2.user_id = $2
+      LIMIT 10`,
+      [senderId, receiverId]
+    );
+
+    // 🌐 Extract usernames for preview
+    const mutualFriends = mutualFriendsRes.rows; // ⬅️ full objects for rendering avatars + tooltips
+    const mutualCount = mutualFriends.length;
+
+    const additional_info = generateAdditionalInfo("friend", {
+      nickname: senderUsername,
+      senderName: senderUsername,
+      mutualFriends,
+    });
+
     await sendNotification(
       receiverId,
       "friend",
       getDefaultNotificationContent("friend", { senderName: senderUsername }),
       `/profile/${senderUsername}`,
-      { requestId, status: "pending" } // 👈 this enables frontend buttons
+      {
+        requestId,
+        status: "pending",
+        userId: receiverId,
+        nickname: senderUsername,
+        mutualCount,
+        mutualFriends,
+      },
+      additional_info
     );
 
     return res.status(200).json({ message: "Friend request sent" });
@@ -219,10 +234,18 @@ const acceptFriendRequest = async (req, res) => {
     const receiverUsername = receiverRes.rows[0]?.username ?? "Someone";
 
     await sendNotification(
-      senderId,
+      receiverId,
       "friend",
-      `${receiverUsername} accepted your friend request.`,
-      `/profile/${receiverUsername}`
+      getDefaultNotificationContent("friend", { senderName: senderUsername }),
+      `/profile/${senderUsername}`,
+      {
+        requestId,
+        status: "pending",
+        nickname: senderUsername,
+        senderName: senderUsername,
+        mutualFriends,
+      },
+      additional_info
     );
 
     return res.status(200).json({ message: "Friend request accepted" });
@@ -389,6 +412,36 @@ const getFriendsList = async (req, res) => {
   }
 };
 
+// ✅ GET mutual friends with another user
+const getMutualFriends = async (req, res) => {
+  const currentUserId = req.user?.user_id;
+  const targetUserId = req.params.userId;
+
+  console.log("🔍 Mutual Friend Request:", { currentUserId, targetUserId });
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT u.user_id, u.username, u.profile_picture
+      FROM users u
+      WHERE u.user_id IN (
+        SELECT f1.friend_id
+        FROM friends f1
+        JOIN friends f2 ON f1.friend_id = f2.friend_id
+        WHERE f1.user_id = $1 AND f2.user_id = $2
+      )
+      LIMIT 10
+      `,
+      [currentUserId, targetUserId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ getMutualFriends error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 module.exports = {
   getRelationshipStatus,
   sendFriendRequest,
@@ -399,4 +452,5 @@ module.exports = {
   resetUnreadCount,
   updateLastMessageTime,
   getFriendsList,
+  getMutualFriends,
 };

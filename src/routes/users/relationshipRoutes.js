@@ -12,6 +12,7 @@ const {
   togglePinnedFriend,
   resetUnreadCount,
   getFriendsList,
+  getMutualFriends,
 } = require("../../controllers/users/relationshipController");
 
 // ✅ GET relationship status with a user
@@ -37,6 +38,9 @@ router.patch("/friends/pin", protectRoute, togglePinnedFriend);
 
 // ✅ PATCH reset unread message count for a friend
 router.patch("/friends/reset-unread", protectRoute, resetUnreadCount);
+
+// ✅ GET mutual friends with another user
+router.get("/mutual/:userId", protectRoute, getMutualFriends);
 
 // ✅ GET all friends that have active 1-on-1 conversations
 router.get("/friends/conversations", protectRoute, async (req, res) => {

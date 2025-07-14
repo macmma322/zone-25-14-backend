@@ -12,7 +12,9 @@ const ConversationMember = require("../../models/ConversationMember");
 const Message = require("../../models/Message");
 const { sendNotification } = require("../../services/notificationService");
 const NotificationTypes = require("../../models/notificationTypes");
+const { generateAdditionalInfo } = require("../../utils/notificationHelpers");
 
+// ✅ Fetch incoming message requests for the user
 const getIncomingRequests = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -32,6 +34,7 @@ const getIncomingRequests = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch message requests" });
   }
 };
+// ✅ Accept a message request
 
 const acceptMessageRequest = async (req, res) => {
   try {
@@ -76,31 +79,30 @@ const acceptMessageRequest = async (req, res) => {
     // 4. Update the request status to accepted
     await MessageRequest.updateRequestStatus(id, "accepted");
 
-    // 5. Check if both users are in the same conversation
-    const memberRes = await pool.query(
-      `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
-      [convo.conversation_id]
+    // 5. Notify sender
+    const senderInfo = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [request.sender_id]
     );
-    const isInConversation = memberRes.rows.some(
-      (member) =>
-        member.user_id === receiverId || member.user_id === request.sender_id
+    const senderUsername = senderInfo.rows[0]?.username || "Someone";
+
+    const receiverInfo = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [receiverId]
     );
+    const receiverUsername = receiverInfo.rows[0]?.username || "Someone";
 
-    // 6. Send notification only if the receiver is not in the conversation (avoiding self-notification)
-    if (!isInConversation) {
-      const senderInfo = await pool.query(
-        `SELECT username FROM users WHERE user_id = $1`,
-        [request.sender_id]
-      );
-      const senderUsername = senderInfo.rows[0]?.username || "Someone";
-
-      await sendNotification(
-        request.sender_id,
-        "message",
-        `${senderUsername} has accepted your message request.`,
-        `/chat/${convo.conversation_id}`
-      );
-    }
+    await sendNotification(
+      request.sender_id,
+      "message",
+      `${receiverUsername} has accepted your message request.`,
+      `/chat/${convo.conversation_id}`,
+      {
+        additional_info: generateAdditionalInfo("message", {
+          nickname: receiverUsername,
+        }),
+      }
+    );
 
     res.status(200).json({
       message: "Message request accepted",
@@ -112,6 +114,7 @@ const acceptMessageRequest = async (req, res) => {
   }
 };
 
+// ✅ Decline a message request
 const declineMessageRequest = async (req, res) => {
   try {
     const { id } = req.params;
@@ -129,40 +132,24 @@ const declineMessageRequest = async (req, res) => {
     // 1. Update the request status to declined
     await MessageRequest.updateRequestStatus(id, "declined");
 
-    // 2. Check if both users are already in the conversation
-    const convoRes = await pool.query(
-      `SELECT conversation_id FROM message_requests WHERE request_id = $1`,
-      [id]
+    // 2. Notify sender
+    const receiverInfo = await pool.query(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [receiverId]
     );
-    const conversationId = convoRes.rows[0]?.conversation_id;
+    const receiverUsername = receiverInfo.rows[0]?.username || "Someone";
 
-    if (conversationId) {
-      const memberRes = await pool.query(
-        `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
-        [conversationId]
-      );
-
-      const isInConversation = memberRes.rows.some(
-        (member) =>
-          member.user_id === receiverId || member.user_id === request.sender_id
-      );
-
-      // If they are in the conversation, don't send a notification
-      if (!isInConversation) {
-        const senderInfo = await pool.query(
-          `SELECT username FROM users WHERE user_id = $1`,
-          [request.sender_id]
-        );
-        const senderUsername = senderInfo.rows[0]?.username || "Someone";
-
-        await sendNotification(
-          request.sender_id,
-          "message",
-          `${senderUsername} has declined your message request.`,
-          `/chat/${conversationId}`
-        );
+    await sendNotification(
+      request.sender_id,
+      "message",
+      `${receiverUsername} has declined your message request.`,
+      undefined,
+      {
+        additional_info: generateAdditionalInfo("message", {
+          nickname: receiverUsername,
+        }),
       }
-    }
+    );
 
     res.status(200).json({ message: "Message request declined" });
   } catch (err) {

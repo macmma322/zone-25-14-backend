@@ -14,7 +14,8 @@ const sendNotification = async (
   type,
   content = null,
   link = null,
-  data = {}
+  data = {},
+  additionalInfo = null
 ) => {
   try {
     console.log("📨 sendNotification called with:", {
@@ -23,6 +24,7 @@ const sendNotification = async (
       content,
       link,
       data,
+      additionalInfo,
     });
 
     if (!userId) throw new Error("❌ Missing target userId.");
@@ -36,10 +38,17 @@ const sendNotification = async (
       content || getDefaultNotificationContent(type, data || {});
 
     const result = await pool.query(
-      `INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data)
-       VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5)
-       RETURNING *`,
-      [userId, type, finalContent, link || null, JSON.stringify(data || {})]
+      `INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data, additional_info)
+      VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
+      RETURNING *`,
+      [
+        userId,
+        type,
+        finalContent,
+        link || null,
+        JSON.stringify(data || {}),
+        additionalInfo || null,
+      ]
     );
 
     const notification = result.rows[0];

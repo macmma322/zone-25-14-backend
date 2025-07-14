@@ -26,26 +26,31 @@ const emitNotificationIfOnline = async (userId, notification) => {
 // 🔔 Create and emit a new notification
 const createNotification = async (req, res) => {
   try {
-    const { user_id, type, content, link, data } = req.body;
+    const { user_id, type, content, link, data, additional_info } = req.body;
 
-    // Validate notification type
     if (!Object.values(NotificationTypes).includes(type)) {
       return res
         .status(400)
         .json({ error: `Invalid notification type: ${type}` });
     }
 
-    // Fallback content if none provided
     const finalContent =
       content || getDefaultNotificationContent(type, data || {});
 
     const result = await pool.query(
       `
-      INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data)
-      VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5)
+      INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data, additional_info)
+      VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
       RETURNING *
       `,
-      [user_id, type, finalContent, link || null, JSON.stringify(data || {})]
+      [
+        userId,
+        type,
+        finalContent,
+        link || null,
+        JSON.stringify(data || {}),
+        additional_info,
+      ]
     );
 
     const notification = result.rows[0];
@@ -234,10 +239,7 @@ const deleteAllNotifications = async (req, res) => {
   const userId = req.user.user_id;
 
   try {
-    await pool.query(
-      `DELETE FROM notifications WHERE user_id = $1`,
-      [userId]
-    );
+    await pool.query(`DELETE FROM notifications WHERE user_id = $1`, [userId]);
 
     res.status(204).send();
   } catch (err) {
@@ -245,7 +247,6 @@ const deleteAllNotifications = async (req, res) => {
     res.status(500).json({ error: "Failed to delete notifications" });
   }
 };
-
 
 module.exports = {
   createNotification,
@@ -257,4 +258,3 @@ module.exports = {
   deleteMultipleNotifications,
   updateNotificationStatus,
 };
-

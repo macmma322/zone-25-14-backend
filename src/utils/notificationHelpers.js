@@ -44,4 +44,55 @@ const getDefaultNotificationContent = (type, data = {}) => {
   }
 };
 
-module.exports = { getDefaultNotificationContent };
+function generateAdditionalInfo(type, data = {}) {
+  switch (type) {
+    case "message":
+      return data.preview ? `Preview: ${data.preview}` : undefined;
+
+    case "friend":
+      const { nickname, senderName, mutualFriends } = data;
+      const isCustomName = nickname && nickname !== senderName;
+
+      let base = isCustomName ? `From: ${nickname}` : null;
+
+      if (Array.isArray(mutualFriends) && mutualFriends.length > 0) {
+        const previewList = mutualFriends.slice(0, 3).join(", ");
+        const moreCount = mutualFriends.length - 3;
+        const moreText = moreCount > 0 ? ` +${moreCount} more` : "";
+        const mutual = `Mutual friends: ${previewList}${moreText}`;
+
+        return base ? `${base} • ${mutual}` : mutual;
+      }
+
+      return base || undefined;
+
+    case "order":
+      if (data.status) return `Status: ${data.status}`;
+      if (data.deliveryETA) return `Expected delivery: ${data.deliveryETA}`;
+      return undefined;
+
+    case "giveaway":
+      return data.reward ? `Reward: ${data.reward}` : undefined;
+
+    case "stream":
+      if (data.countdown && data.event)
+        return `Event: ${data.event} • Goes live in: ${data.countdown}`;
+      if (data.event) return `Event: ${data.event}`;
+      if (data.countdown) return `Goes live in: ${data.countdown}`;
+      return undefined;
+
+    case "reaction":
+      if (data.emoji && data.targetSnippet)
+        return `${data.emoji} on: "${data.targetSnippet}"`;
+      if (data.targetSnippet) return `On: "${data.targetSnippet}"`;
+      return undefined;
+
+    case "achievement":
+      return data.title ? `🔥 ${data.title}` : undefined;
+
+    default:
+      return undefined;
+  }
+}
+
+module.exports = { getDefaultNotificationContent, generateAdditionalInfo };

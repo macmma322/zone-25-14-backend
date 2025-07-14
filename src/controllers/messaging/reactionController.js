@@ -8,8 +8,10 @@ const { getIO, getSocketIdByUserId } = require("../../config/socket");
 const { sendNotification } = require("../../services/notificationService");
 const {
   getDefaultNotificationContent,
+  generateAdditionalInfo,
 } = require("../../utils/notificationHelpers");
 
+// ✅ Toggle Reaction
 const toggleReactionController = async (req, res) => {
   const { message_id, reaction } = req.body;
   const user_id = req.user.user_id;
@@ -48,8 +50,6 @@ const toggleReactionController = async (req, res) => {
     const conversationId = convoResult.rows[0]?.conversation_id;
 
     const io = getIO();
-
-    // 📡 Broadcast to conversation room
     if (conversationId && type) {
       io.to(conversationId).emit("reactionUpdated", {
         message_id,
@@ -60,15 +60,14 @@ const toggleReactionController = async (req, res) => {
       });
     }
 
-    // 🔔 Notify only original message sender (smart)
     if (type === "add" && conversationId) {
       const msgSenderRes = await db.query(
-        `SELECT sender_id FROM messages WHERE message_id = $1`,
+        `SELECT sender_id, content FROM messages WHERE message_id = $1`,
         [message_id]
       );
       const messageSenderId = msgSenderRes.rows[0]?.sender_id;
+      const targetMessageContent = msgSenderRes.rows[0]?.content || "";
 
-      // Skip self-reaction or missing data
       if (!messageSenderId || messageSenderId === user_id) {
         return res
           .status(200)
@@ -79,23 +78,41 @@ const toggleReactionController = async (req, res) => {
           );
       }
 
-      // Check if target is in room
       const socketId = await getSocketIdByUserId(messageSenderId);
       const room = io.sockets.adapter.rooms.get(conversationId);
       const socketsInRoom = room ? Array.from(room) : [];
       const isInRoom = socketId && socketsInRoom.includes(socketId);
 
       if (!isInRoom) {
+        const quote =
+          targetMessageContent.length > 40
+            ? targetMessageContent.slice(0, 40) + "..."
+            : targetMessageContent;
+
+        const additional_info = generateAdditionalInfo("reaction", {
+          targetSnippet: quote,
+          emoji: reaction,
+        });
+        // Fetch message content for preview
+        const messagePreviewRes = await db.query(
+          `SELECT content FROM messages WHERE message_id = $1`,
+          [message_id]
+        );
+        const preview = messagePreviewRes.rows[0]?.content || "Message";
+        const shortPreview =
+          preview.length > 40 ? preview.slice(0, 40) + "..." : preview;
+
         await sendNotification(
           messageSenderId,
           "reaction",
           getDefaultNotificationContent("reaction", { senderName: username }),
-          `/chat/${conversationId}`
+          `/chat/${conversationId}`,
+          {},
+          additional_info
         );
       }
     }
 
-    // ✅ Final Response
     if (type === "remove") {
       return res.status(200).json({ removed: true, emoji: reaction });
     } else if (type === "add" && reactionData) {
@@ -109,7 +126,7 @@ const toggleReactionController = async (req, res) => {
   }
 };
 
-// GET /api/reactions?messageId=abc
+//✅ Get Reactions by Message
 const getReactionsByMessage = async (req, res) => {
   const { messageId } = req.query;
   if (!messageId) {
@@ -128,7 +145,7 @@ const getReactionsByMessage = async (req, res) => {
   }
 };
 
-// GET /api/reactions/byConversation?conversationId=xyz
+// ✅ Get Reactions by Conversation
 const getReactionsByConversation = async (req, res) => {
   const { conversationId } = req.query;
   if (!conversationId) {
@@ -150,7 +167,7 @@ const getReactionsByConversation = async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 };
-// PATCH /api/reactions/:reactionId
+// ✅ Update Reaction
 const updateReaction = async (req, res) => {
   const { reactionId } = req.params;
   const { newReaction } = req.body;
@@ -182,7 +199,7 @@ const updateReaction = async (req, res) => {
   }
 };
 
-// DELETE /api/reactions/:reactionId
+// ✅ Delete Reaction
 const deleteReaction = async (req, res) => {
   const { reactionId } = req.params;
   const userId = req.user.user_id;

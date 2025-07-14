@@ -15,8 +15,10 @@ const { getConversationById } = require("../../models/conversationModel");
 const { sendNotification } = require("../../services/notificationService");
 const {
   getDefaultNotificationContent,
+  generateAdditionalInfo,
 } = require("../../utils/notificationHelpers");
 
+// ✅ CREATE Conversation
 const createConversation = async (req, res) => {
   try {
     const { isGroup, groupName, memberIds } = req.body;
@@ -72,6 +74,7 @@ const createConversation = async (req, res) => {
   }
 };
 
+// ✅ ADD Member to Conversation
 const addMember = async (req, res) => {
   try {
     const { conversationId, newMemberId } = req.body;
@@ -86,20 +89,15 @@ const addMember = async (req, res) => {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
-    // 1. Add the new member to the DB
     await ConversationMember.addMemberToConversation(
       conversationId,
       newMemberId
     );
 
-    // 2. Get convo name (for group context)
     const convo = await getConversationById(conversationId);
-
-    // 3. Get sender username (optional but nice)
     const senderInfo = await getUserWithRole(user_id);
     const senderName = senderInfo?.username || "Someone";
 
-    // 4. Send notification
     await sendNotification(
       newMemberId,
       "message",
@@ -117,6 +115,7 @@ const addMember = async (req, res) => {
   }
 };
 
+// ✅ SEND Message
 const sendMessage = async (req, res) => {
   try {
     const user_id = req.user.user_id;
@@ -128,7 +127,6 @@ const sendMessage = async (req, res) => {
         .json({ error: "Missing conversationId or content" });
     }
 
-    // 1. Save to DB
     const message = await Message.sendMessage(
       conversationId,
       user_id,
@@ -136,14 +134,12 @@ const sendMessage = async (req, res) => {
       replyToMessageId || null
     );
 
-    // 2. Get sender username
     const senderRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
       [user_id]
     );
     const username = senderRes.rows[0]?.username || "Unknown";
 
-    // 3. Optional: fetch reply info
     let replyToMessage = null;
     if (replyToMessageId) {
       const replyRes = await pool.query(
@@ -163,7 +159,6 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    // 4. Update friendship timestamp
     const memberRes = await pool.query(
       `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
       [conversationId]
@@ -179,7 +174,6 @@ const sendMessage = async (req, res) => {
       }
     }
 
-    // 5. Emit the message
     const fullMessage = {
       message_id: message.message_id,
       conversation_id: conversationId,
@@ -191,9 +185,8 @@ const sendMessage = async (req, res) => {
     };
     getIO().to(conversationId).emit("receiveMessage", fullMessage);
 
-    // 6. 🔥 Send notification if NOT in same room
     const io = getIO();
-    const room = io.sockets.adapter.rooms.get(conversationId); // Set of socket IDs
+    const room = io.sockets.adapter.rooms.get(conversationId);
     const socketsInRoom = room ? Array.from(room) : [];
 
     for (const member of memberRes.rows) {
@@ -206,6 +199,13 @@ const sendMessage = async (req, res) => {
         targetSocketId && socketsInRoom.includes(targetSocketId);
 
       if (!isViewingRoom) {
+        const preview =
+          content.length > 40 ? content.slice(0, 40) + "..." : content;
+        const additional_info = generateAdditionalInfo(
+          replyToMessageId ? "reply" : "message",
+          { preview }
+        );
+
         await sendNotification(
           targetId,
           replyToMessageId ? "reply" : "message",
@@ -215,7 +215,9 @@ const sendMessage = async (req, res) => {
               senderName: username,
             }
           ),
-          `/chat/${conversationId}`
+          `/chat/${conversationId}`,
+          {},
+          additional_info
         );
       }
     }
@@ -227,6 +229,7 @@ const sendMessage = async (req, res) => {
   }
 };
 
+// ✅ GET Messages
 const getMessages = async (req, res) => {
   const { conversationId, before, limit = 30 } = req.query;
 
