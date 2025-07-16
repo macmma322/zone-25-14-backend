@@ -141,6 +141,7 @@ const sendFriendRequest = async (req, res) => {
       {
         requestId,
         status: "pending",
+        senderId, // ✅ ADD THIS LINE
         userId: receiverId,
         nickname: senderUsername,
         mutualCount,
