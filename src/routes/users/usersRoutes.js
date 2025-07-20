@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const userController = require("../../controllers/users/usersController.js");
 const { protectRoute } = require("../../middleware/authMiddleware");
-const upload = require("../../middleware/uploadMiddleware");
+const { uploadAvatar } = require("../../middleware/uploadMiddleware");
 const privacyRoutes = require("./userPrivacyRoutes");
 
 // ✅ Auth routes
@@ -12,7 +12,7 @@ router.patch("/profile", protectRoute, userController.updateProfile);
 router.patch(
   "/profile/avatar",
   protectRoute,
-  upload.single("avatar"),
+  uploadAvatar.single("avatar"), // ✅ FIXED
   userController.uploadAvatar
 );
 router.patch("/profile/birthday", protectRoute, userController.setBirthday);

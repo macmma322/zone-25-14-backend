@@ -18,15 +18,6 @@ const sendNotification = async (
   additionalInfo = null
 ) => {
   try {
-    console.log("📨 sendNotification called with:", {
-      userId,
-      type,
-      content,
-      link,
-      data,
-      additionalInfo,
-    });
-
     if (!userId) throw new Error("❌ Missing target userId.");
     if (!type || typeof type !== "string")
       throw new Error("❌ Notification type is undefined.");
@@ -60,9 +51,6 @@ const sendNotification = async (
     if (socketId) {
       const io = getIO();
       io.to(socketId).emit("notification", notification);
-      console.log("🚀 Emitted notification to socket:", socketId);
-    } else {
-      console.log("📭 User offline, saved to DB only.");
     }
 
     return notification;

@@ -191,26 +191,16 @@ const acceptFriendRequest = async (req, res) => {
   const { requestId } = req.body;
 
   try {
-    console.log("🔍 Accepting friend request:", requestId);
-
     const reqRes = await pool.query(
       `SELECT sender_id FROM friend_requests
        WHERE request_id = $1 AND receiver_id = $2 AND status = 'pending'`,
       [requestId, receiverId]
     );
     if (!reqRes.rows.length) {
-      console.log("⚠️ Friend request not found or already handled.");
       return res.status(404).json({ error: "Request not found" });
     }
 
     const senderId = reqRes.rows[0].sender_id;
-
-    console.log(
-      "👥 Accepting friendship between:",
-      senderId,
-      "<->",
-      receiverId
-    );
 
     await pool.query(
       `UPDATE friend_requests SET status = 'accepted' WHERE request_id = $1`,
@@ -225,8 +215,6 @@ const acceptFriendRequest = async (req, res) => {
        ON CONFLICT DO NOTHING`,
       [senderId, receiverId]
     );
-
-    console.log("✅ Friendship saved to database");
 
     const receiverRes = await pool.query(
       `SELECT username FROM users WHERE user_id = $1`,
@@ -304,10 +292,6 @@ const togglePinnedFriend = async (req, res) => {
   const userId = req.user.user_id;
   const { friendId } = req.body;
 
-  console.log("🔄 Toggle pin called:");
-  console.log("User ID:", userId);
-  console.log("Friend ID:", friendId);
-
   try {
     const result = await pool.query(
       `SELECT pinned FROM friends WHERE user_id = $1 AND friend_id = $2`,
@@ -315,14 +299,11 @@ const togglePinnedFriend = async (req, res) => {
     );
 
     if (!result.rows.length) {
-      console.log("Friend not found between users.");
       return res.status(404).json({ error: "Friend not found" });
     }
 
     const currentPinned = result.rows[0].pinned;
     const newPinned = !currentPinned;
-
-    console.log("Current pinned:", currentPinned, "→ New:", newPinned);
 
     await pool.query(
       `UPDATE friends SET pinned = $1 WHERE user_id = $2 AND friend_id = $3`,
@@ -417,8 +398,6 @@ const getFriendsList = async (req, res) => {
 const getMutualFriends = async (req, res) => {
   const currentUserId = req.user?.user_id;
   const targetUserId = req.params.userId;
-
-  console.log("🔍 Mutual Friend Request:", { currentUserId, targetUserId });
 
   try {
     const result = await pool.query(

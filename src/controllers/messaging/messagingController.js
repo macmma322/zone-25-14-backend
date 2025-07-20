@@ -119,19 +119,22 @@ const addMember = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const user_id = req.user.user_id;
-    const { conversationId, content, replyToMessageId } = req.body;
+    const { conversationId, content, replyToMessageId, media_url, media_type } =
+      req.body;
 
-    if (!conversationId || !content) {
+    if (!conversationId || (!content && !media_url)) {
       return res
         .status(400)
-        .json({ error: "Missing conversationId or content" });
+        .json({ error: "Message must have either content or media." });
     }
 
     const message = await Message.sendMessage(
       conversationId,
       user_id,
-      content,
-      replyToMessageId || null
+      content || "", // default to "" if only media is sent
+      replyToMessageId || null,
+      media_url || null,
+      media_type || null
     );
 
     const senderRes = await pool.query(
@@ -181,8 +184,11 @@ const sendMessage = async (req, res) => {
       username,
       content: message.content,
       sent_at: message.sent_at,
+      media_url: message.media_url,
+      media_type: message.media_type,
       reply_to_message: replyToMessage || undefined,
     };
+
     getIO().to(conversationId).emit("receiveMessage", fullMessage);
 
     const io = getIO();
@@ -247,6 +253,8 @@ const getMessages = async (req, res) => {
         m.content,
         m.sent_at,
         m.reply_to_id,
+        m.media_url,
+        m.media_type,
         r.content AS reply_to_content,
         ru.username AS reply_to_username
       FROM messages m
@@ -314,6 +322,8 @@ const getMessages = async (req, res) => {
             content: msg.reply_to_content,
           }
         : undefined,
+      media_url: msg.media_url,
+      media_type: msg.media_type,
       reactions: reactionsMap.get(msg.message_id) || [],
     }));
 

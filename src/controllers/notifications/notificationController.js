@@ -14,9 +14,6 @@ const emitNotificationIfOnline = async (userId, notification) => {
     const socketId = await getSocketIdByUserId(userId);
     if (socketId) {
       getIO().to(socketId).emit("notification", notification);
-      console.log("📨 Emitted notification to socket:", socketId);
-    } else {
-      console.log("🔕 User is offline — notification stored only in DB");
     }
   } catch (err) {
     console.error("❌ emitNotificationIfOnline error:", err.message);

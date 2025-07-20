@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────//
 //                  Imports                     //
 // ─────────────────────────────────────────────//
-
+const express = require("express");
 // ─────────────────────────────────────────────
 // Core
 // ─────────────────────────────────────────────
@@ -36,6 +36,8 @@ const reactionRoutes = require("../routes/messaging/reactionRoutes");
 // ─────────────────────────────────────────────
 const searchRoutes = require("../routes/search/search");
 const notificationRoutes = require("../routes/notifications/notificationRoutes");
+const messageUploadRoutes = require("../routes/messaging/messageUploadRoutes");
+// ─────────────────────────────────────────────
 
 module.exports = function loadRoutes(app) {
   // 🔐 Auth
@@ -64,6 +66,10 @@ module.exports = function loadRoutes(app) {
   // 💬 Messaging
   app.use("/api/messaging", messagingRoutes);
   app.use("/api/reactions", reactionRoutes);
+  app.use("/api/messages", messageUploadRoutes);
+
+  // Serve static media
+  app.use("/uploads", express.static("uploads"));
 
   // 🔍 Search
   app.use("/api/search", searchRoutes);

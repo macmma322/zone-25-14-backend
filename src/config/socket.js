@@ -23,18 +23,14 @@ module.exports = {
     });
 
     ioInstance.on("connection", async (socket) => {
-      console.log(`📡 Socket connected: ${socket.id}`);
-
       try {
         const cookie = socket.handshake.headers.cookie || "";
         const match = cookie.match(/authToken=([^;]+)/);
 
         if (match) {
           const token = match[1];
-          console.log("🍪 Incoming authToken cookie:", token);
 
           const decoded = jwt.verify(token, process.env.JWT_SECRET);
-          console.log("🔐 Token valid:", decoded);
 
           const userId = decoded.user_id;
 
@@ -52,7 +48,6 @@ module.exports = {
 
       socket.on("joinRoom", (conversationId) => {
         socket.join(conversationId);
-        console.log(`👥 Socket ${socket.id} joined room ${conversationId}`);
       });
 
       socket.on("typing", ({ conversationId, sender }) => {
@@ -65,7 +60,6 @@ module.exports = {
       });
 
       socket.on("reconnect", async () => {
-        console.log("🔁 Socket reconnected");
         try {
           await presenceService.setUserOnline(socket.userId);
           await broadcastPresenceToFriends(socket.userId, "online");
@@ -75,7 +69,6 @@ module.exports = {
       });
 
       socket.on("disconnect", async () => {
-        console.log(`❌ Disconnected: ${socket.id}`);
         const userId = socket.userId;
         if (userId) {
           await redis.del(`presence:${userId}`);
@@ -117,8 +110,6 @@ async function broadcastPresenceToFriends(userId, status) {
       status === "offline" ? await presenceService.getLastSeen(userId) : null;
 
     const friends = result.rows.map((r) => r.friend_id);
-    console.log("📢 Broadcasting to:", friends);
-    console.log("🎯 Sending status for:", userId, status);
 
     for (const friendId of friends) {
       const socketId = await redis.get(`presence:${friendId}`);
