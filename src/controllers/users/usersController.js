@@ -1,7 +1,12 @@
+// zone-25-14-backend/src/controllers/users/usersController.js
+// This file contains the user-related controller functions for handling profile data, social links, preferences, and more.
+// It interacts with the database to retrieve and update user information.
+// Import necessary modules and configurations
 const pool = require("../../config/db");
+const { getIO } = require("../../config/socket");
 
 // ✅ GET Profile Overview
-exports.getProfileOverview = async (req, res) => {
+const getProfileOverview = async (req, res) => {
   const userId = req.user.user_id;
 
   try {
@@ -18,12 +23,18 @@ exports.getProfileOverview = async (req, res) => {
         rl.discount_percentage,
         rl.required_points,
         rl.is_staff,
-        u.biography
+        u.biography,
+        u.display_name,
+        u.banner_image
       FROM users u
       JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
       WHERE u.user_id = $1
     `,
       [userId, encryptionKey]
+    );
+    const linkedRes = await pool.query(
+      `SELECT provider, profile_url, avatar_url FROM user_linked_accounts WHERE user_id = $1`,
+      [userId]
     );
 
     const user = userRes.rows[0];
@@ -82,6 +93,7 @@ exports.getProfileOverview = async (req, res) => {
       subscriptions: subs.rows,
       cart_items: parseInt(cartCount.rows[0].count),
       wishlist_items: parseInt(wishlistCount.rows[0].count),
+      linkedAccounts: linkedRes.rows,
     });
   } catch (err) {
     console.error("Profile Hub Error:", err.message);
@@ -90,7 +102,7 @@ exports.getProfileOverview = async (req, res) => {
 };
 
 // ✅ Public Profile Route
-exports.getPublicProfile = async (req, res) => {
+const getPublicProfile = async (req, res) => {
   const { username } = req.params;
 
   try {
@@ -99,8 +111,10 @@ exports.getPublicProfile = async (req, res) => {
       SELECT 
         u.user_id,
         u.username,
+        u.display_name,
         u.biography,
         u.profile_picture,
+        u.banner_image,
         rl.role_name
       FROM users u
       LEFT JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
@@ -120,8 +134,66 @@ exports.getPublicProfile = async (req, res) => {
   }
 };
 
+// ✅ GET user social links
+const getUserSocialLinks = async (req, res) => {
+  const userId = req.user.user_id;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT instagram, youtube, twitch, twitter, website
+      FROM user_socials
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(200).json({
+        instagram: null,
+        youtube: null,
+        twitch: null,
+        twitter: null,
+        website: null,
+      });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error("Get Social Links Error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ✅ UPDATE user social links
+const updateUserSocialLinks = async (req, res) => {
+  const userId = req.user.user_id;
+  const { instagram, youtube, twitch, twitter, website } = req.body;
+
+  try {
+    await pool.query(
+      `
+      INSERT INTO user_socials (user_id, instagram, youtube, twitch, twitter, website)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (user_id) DO UPDATE
+      SET instagram = EXCLUDED.instagram,
+          youtube = EXCLUDED.youtube,
+          twitch = EXCLUDED.twitch,
+          twitter = EXCLUDED.twitter,
+          website = EXCLUDED.website
+      `,
+      [userId, instagram, youtube, twitch, twitter, website]
+    );
+
+    res.status(200).json({ message: "Social links updated successfully." });
+  } catch (err) {
+    console.error("Update Social Links Error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // ✅ PATCH: Update username only
-exports.updateProfile = async (req, res) => {
+const updateProfile = async (req, res) => {
   const userId = req.user.user_id;
   const { username } = req.body;
 
@@ -139,21 +211,27 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ✅ PATCH: Upload avatar image (used with multer)
-exports.uploadAvatar = async (req, res) => {
+const uploadAvatar = async (req, res) => {
   const userId = req.user.user_id;
 
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
   }
 
-  const imagePath = `/uploads/avatars/${req.file.filename}`;
+  const imagePath = `/uploads/avatars/${userId}/${req.file.filename}`;
 
   try {
+    // Update user profile with the new avatar URL
     await pool.query(
       `UPDATE users SET profile_picture = $1 WHERE user_id = $2`,
       [imagePath, userId]
     );
 
+    // Emit a socket event to notify other parts of the app
+    const io = getIO(); // Get the socket instance
+    io.emit("userAvatarUpdated", { userId, newAvatarUrl: imagePath });
+
+    // Send the response with the updated avatar
     res.status(200).json({
       message: "Avatar uploaded successfully.",
       avatar: imagePath,
@@ -165,7 +243,7 @@ exports.uploadAvatar = async (req, res) => {
 };
 
 // ✅ PATCH: Set birthday (only once)
-exports.setBirthday = async (req, res) => {
+const setBirthday = async (req, res) => {
   const userId = req.user.user_id;
   const { birthday } = req.body;
 
@@ -191,7 +269,7 @@ exports.setBirthday = async (req, res) => {
 };
 
 // ✅ GET user preferences
-exports.getUserPreferences = async (req, res) => {
+const getUserPreferences = async (req, res) => {
   const userId = req.user.user_id;
 
   try {
@@ -216,7 +294,7 @@ exports.getUserPreferences = async (req, res) => {
 };
 
 // ✅ PATCH: Update user preferences
-exports.updateUserPreferences = async (req, res) => {
+const updateUserPreferences = async (req, res) => {
   const userId = req.user.user_id;
   const { theme_mode, language, preferred_currency, email_notifications } =
     req.body;
@@ -241,3 +319,50 @@ exports.updateUserPreferences = async (req, res) => {
   }
 };
 
+// ✅ GET user display preferences
+const getDisplayPreferences = async (req, res) => {
+  const userId = req.user.user_id;
+  try {
+    const result = await pool.query(
+      `SELECT selected_title_id, selected_badge_id FROM user_display_preferences WHERE user_id = $1`,
+      [userId]
+    );
+    res.status(200).json(result.rows[0] || {});
+  } catch (err) {
+    console.error("Display Preferences Error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ✅ UPDATE user display preferences
+const updateDisplayPreferences = async (req, res) => {
+  const userId = req.user.user_id;
+  const { selected_title_id, selected_badge_id } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO user_display_preferences (user_id, selected_title_id, selected_badge_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE
+       SET selected_title_id = $2, selected_badge_id = $3`,
+      [userId, selected_title_id, selected_badge_id]
+    );
+    res.status(200).json({ message: "Display preferences updated." });
+  } catch (err) {
+    console.error("Update Display Preferences Error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+module.exports = {
+  getProfileOverview,
+  getPublicProfile,
+  getUserSocialLinks,
+  updateUserSocialLinks,
+  updateProfile,
+  uploadAvatar,
+  setBirthday,
+  getUserPreferences,
+  updateUserPreferences,
+  getDisplayPreferences,
+  updateDisplayPreferences,
+};

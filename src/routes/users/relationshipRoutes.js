@@ -13,6 +13,7 @@ const {
   resetUnreadCount,
   getFriendsList,
   getMutualFriends,
+  getFriendCount,
 } = require("../../controllers/users/relationshipController");
 
 // ✅ GET relationship status with a user
@@ -41,6 +42,9 @@ router.patch("/friends/reset-unread", protectRoute, resetUnreadCount);
 
 // ✅ GET mutual friends with another user
 router.get("/mutual/:userId", protectRoute, getMutualFriends);
+
+// ✅ GET total number of friends for the current user
+router.get("/friends/count", protectRoute, getFriendCount);
 
 // ✅ GET all friends that have active 1-on-1 conversations
 router.get("/friends/conversations", protectRoute, async (req, res) => {

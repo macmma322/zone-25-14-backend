@@ -422,6 +422,21 @@ const getMutualFriends = async (req, res) => {
   }
 };
 
+// ✅ Get total number of friends
+const getFriendCount = async (req, res) => {
+  const userId = req.user.user_id;
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*) FROM friends WHERE user_id = $1 AND is_removed = FALSE AND is_blocked = FALSE`,
+      [userId]
+    );
+    res.json({ count: parseInt(result.rows[0].count, 10) });
+  } catch (err) {
+    console.error("Error fetching friend count:", err);
+    res.status(500).json({ error: "Failed to fetch friend count" });
+  }
+};
+
 module.exports = {
   getRelationshipStatus,
   sendFriendRequest,
@@ -433,4 +448,5 @@ module.exports = {
   updateLastMessageTime,
   getFriendsList,
   getMutualFriends,
+  getFriendCount,
 };

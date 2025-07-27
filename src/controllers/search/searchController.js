@@ -10,6 +10,7 @@ exports.searchAll = async (req, res) => {
   const query = `%${q.toLowerCase()}%`;
 
   try {
+    // Searching for users
     const users = await pool.query(
       `SELECT user_id, username, first_name, last_name FROM users
        WHERE LOWER(username) ILIKE $1
@@ -19,12 +20,38 @@ exports.searchAll = async (req, res) => {
       [query]
     );
 
-    // Return users only for now, rest are empty
+    // Searching for products
+    const products = await pool.query(
+      `SELECT product_id, name, description FROM products
+       WHERE LOWER(name) ILIKE $1
+       OR LOWER(description) ILIKE $1
+       LIMIT 10`,
+      [query]
+    );
+
+    // Searching for blog posts
+    const blogPosts = await pool.query(
+      `SELECT post_id, title FROM blog_posts
+       WHERE LOWER(title) ILIKE $1
+       LIMIT 10`,
+      [query]
+    );
+
+    // Searching for events
+    const events = await pool.query(
+      `SELECT event_id, name, description FROM events
+       WHERE LOWER(name) ILIKE $1
+       OR LOWER(description) ILIKE $1
+       LIMIT 10`,
+      [query]
+    );
+
+    // Return all results
     return res.json({
-      products: [],
       users: users.rows,
-      blogPosts: [],
-      events: [],
+      products: products.rows,
+      blogPosts: blogPosts.rows,
+      events: events.rows,
     });
   } catch (error) {
     console.error("Search failed:", error);

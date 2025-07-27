@@ -35,13 +35,19 @@ const toggleReactionController = async (req, res) => {
       const insertResult = await db.query(
         `INSERT INTO message_reactions (user_id, message_id, reaction)
          VALUES ($1, $2, $3)
-         RETURNING reaction_id, user_id, message_id, reaction, reacted_at,
-                   (SELECT username FROM users WHERE user_id = $1) AS username`,
+         RETURNING reaction_id, user_id, message_id, reaction, reacted_at`,
         [user_id, message_id, reaction]
       );
       reactionData = insertResult.rows[0];
       type = "add";
     }
+
+    // Fetch the user's avatar directly from the `users` table
+    const userProfileRes = await db.query(
+      `SELECT profile_picture FROM users WHERE user_id = $1`,
+      [user_id]
+    );
+    const userAvatar = userProfileRes.rows[0]?.profile_picture || null;
 
     const convoResult = await db.query(
       `SELECT conversation_id FROM messages WHERE message_id = $1`,
@@ -57,6 +63,7 @@ const toggleReactionController = async (req, res) => {
         reaction,
         username,
         type,
+        avatar: userAvatar, // Use the avatar directly here
       });
     }
 
@@ -93,14 +100,11 @@ const toggleReactionController = async (req, res) => {
           targetSnippet: quote,
           emoji: reaction,
         });
-        // Fetch message content for preview
-        const messagePreviewRes = await db.query(
-          `SELECT content FROM messages WHERE message_id = $1`,
-          [message_id]
-        );
-        const preview = messagePreviewRes.rows[0]?.content || "Message";
+
         const shortPreview =
-          preview.length > 40 ? preview.slice(0, 40) + "..." : preview;
+          targetMessageContent.length > 40
+            ? targetMessageContent.slice(0, 40) + "..."
+            : targetMessageContent;
 
         await sendNotification(
           messageSenderId,

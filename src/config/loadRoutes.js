@@ -1,56 +1,74 @@
 // 🔁 Route Loader for Zone 25-14 Backend
 // Centralizes and registers all API routes
 
-// ─────────────────────────────────────────────//
-//                  Imports                     //
-// ─────────────────────────────────────────────//
 const express = require("express");
+
 // ─────────────────────────────────────────────
-// Core
+// 🔐 Core Auth & Identity
 // ─────────────────────────────────────────────
 const authRoutes = require("../routes/auth/authRoutes");
 const userRoutes = require("../routes/users/usersRoutes");
-const presenceRoutes = require("../routes/presenceRoutes");
-// ─────────────────────────────────────────────
 const relationshipRoutes = require("../routes/users/relationshipRoutes");
+const presenceRoutes = require("../routes/presenceRoutes");
+const accountRoutes = require("../routes/users/accountsRoutes");
+
+// ─────────────────────────────────────────────
+// 🧍 User Display, Roles, Rewards
+// ─────────────────────────────────────────────
+const titlesRoutes = require("../routes/users/titlesRoutes");
+const badgesRoutes = require("../routes/users/badgesRoutes");
+const activityRoutes = require("../routes/users/activityRoutes");
 const pointsRoutes = require("../routes/points/pointsRoutes");
 const rolesRoutes = require("../routes/roles/rolesRoutes");
+
 // ─────────────────────────────────────────────
-// E-Commerce
+// 🛒 E-Commerce & Orders
 // ─────────────────────────────────────────────
 const productRoutes = require("../routes/products/productRoutes");
 const cartRoutes = require("../routes/cart/cartRoutes");
 const wishlistRoutes = require("../routes/wishlist/wishlistRoutes");
 const orderRoutes = require("../routes/orders/orderRoutes");
+
 // ─────────────────────────────────────────────
-// Subscriptions
+// 📦 Subscriptions & Plans
 // ─────────────────────────────────────────────
 const subscriptionRoutes = require("../routes/subscriptions/subscriptionRoutes");
+
 // ─────────────────────────────────────────────
-// Messaging
+// 💬 Messaging & Reactions
 // ─────────────────────────────────────────────
 const messagingRoutes = require("../routes/messaging/messagingRoutes");
 const reactionRoutes = require("../routes/messaging/reactionRoutes");
-// ─────────────────────────────────────────────
-// Search
-// ─────────────────────────────────────────────
-const searchRoutes = require("../routes/search/search");
-const notificationRoutes = require("../routes/notifications/notificationRoutes");
 const messageUploadRoutes = require("../routes/messaging/messageUploadRoutes");
-// ─────────────────────────────────────────────
 
+// ─────────────────────────────────────────────
+// 🔍 Search, Notifications, Misc
+// ─────────────────────────────────────────────
+const searchRoutes = require("../routes/search/searchRoutes");
+const notificationRoutes = require("../routes/notifications/notificationRoutes");
+
+// ─────────────────────────────────────────────
+// 🕒 Import and run cron jobs for background tasks
+// ─────────────────────────────────────────────
+require("../jobs/expirationNotifications"); // This will automatically run the cron job defined in expirationNotifications.js
+
+// ─────────────────────────────────────────────
+// 🔧 Route Registration
+// ─────────────────────────────────────────────
 module.exports = function loadRoutes(app) {
-  // 🔐 Auth
+  // 🔐 Authentication
   app.use("/api/auth", authRoutes);
 
-  // 👤 Users
+  // 👤 User Systems
   app.use("/api/users", userRoutes);
   app.use("/api/users", relationshipRoutes);
-
-  // 🏆 User Presence
   app.use("/api/presence", presenceRoutes);
+  app.use("/api/users/accounts", accountRoutes);
 
-  // 🎯 Points & Roles
+  // 🎖️ Display, Progression, Status
+  app.use("/api/users/titles", titlesRoutes);
+  app.use("/api/users/badges", badgesRoutes);
+  app.use("/api/users/activity", activityRoutes);
   app.use("/api/points", pointsRoutes);
   app.use("/api/roles", rolesRoutes);
 
@@ -63,17 +81,15 @@ module.exports = function loadRoutes(app) {
   // 📦 Subscriptions
   app.use("/api", subscriptionRoutes);
 
-  // 💬 Messaging
+  // 💬 Messaging System
   app.use("/api/messaging", messagingRoutes);
   app.use("/api/reactions", reactionRoutes);
   app.use("/api/messages", messageUploadRoutes);
 
-  // Serve static media
-  app.use("/uploads", express.static("uploads"));
-
-  // 🔍 Search
+  // 🧾 Misc / Utilities
   app.use("/api/search", searchRoutes);
-
-  // 🔔 Notifications
   app.use("/api/notifications", notificationRoutes);
+
+  // 📂 Static Assets (e.g. avatars, uploads)
+  app.use("/uploads", express.static("uploads"));
 };

@@ -1,35 +1,25 @@
-// Middleware for handling uploads
-// zone-25-14-backend/src/middleware/uploadMiddleware.js
-// 🗂️ Handles file uploads for avatars and chat media\
-// 📂 Uses multer for file handling and storage
-// 📁 Creates directories dynamically based on user uploads
-// 📸 Supports image and video uploads with size limits
-// 📜 Filters files based on type to ensure only allowed formats are uploaded
-// 📦 Exports upload functions for use in routes
-// 🚀 Optimized for performance and security
-// 🚧 Ensure uploads directory exists before starting the server
-// 🚧 Requires multer, path, and fs modules
-
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// 🧠 Create storage dynamically by type
-const createStorage = (folderName) =>
-  multer.diskStorage({
+// 🧠 Create storage dynamically by folder type and user ID
+const createStorage = (folderName) => {
+  return multer.diskStorage({
     destination: function (req, file, cb) {
-      const dest = `uploads/${folderName}`;
+      const userId = req.user ? req.user.user_id : "guest"; // Default to 'guest' if user is undefined
+      const dest = `uploads/${folderName}/${userId}`;
       fs.mkdirSync(dest, { recursive: true });
-      cb(null, dest);
+      cb(null, dest); // Set destination to user-specific folder
     },
     filename: function (req, file, cb) {
       const ext = path.extname(file.originalname);
-      const uniqueName = `${req.user?.userId || "guest"}-${Date.now()}${ext}`;
+      const uniqueName = `${Date.now()}${ext}`; // Create a unique filename based on timestamp
       cb(null, uniqueName);
     },
   });
+};
 
-// ✔️ Only allow image mimetypes for avatars
+// File filters
 const avatarFilter = (req, file, cb) => {
   const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
   allowed.includes(file.mimetype)
@@ -37,7 +27,7 @@ const avatarFilter = (req, file, cb) => {
     : cb(new Error("Only image files are allowed."));
 };
 
-// ✔️ Allow images + videos for chat messages
+// ✔️ Allow images and videos for chat messages (media)
 const mediaFilter = (req, file, cb) => {
   const allowed = [
     "image/jpeg",
@@ -50,33 +40,37 @@ const mediaFilter = (req, file, cb) => {
   ];
   allowed.includes(file.mimetype)
     ? cb(null, true)
-    : cb(new Error("Only images and videos are allowed."));
+    : cb(new Error("Only images and videos are allowed for media."));
 };
 
+// Create the upload middleware
 const uploadAvatar = multer({
   storage: createStorage("avatars"),
   fileFilter: avatarFilter,
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB for avatars
 });
 
+// 🧳 Media (chat uploads) middleware for images and videos
 const uploadMedia = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, "uploads/message_media");
-    },
-    filename: (req, file, cb) => {
-      const uniqueName = `${
-        req.user?.username || "guest"
-      }-${Date.now()}${path.extname(file.originalname)}`;
-      cb(null, uniqueName);
-    },
-  }),
-  limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB
-  },
+  storage: createStorage("message_media"), // Directly pass the storage object
+  fileFilter: mediaFilter,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB for media
 });
 
 module.exports = {
   uploadAvatar,
   uploadMedia,
+};
+
+// 🧳 Banner upload middleware (future use)
+const uploadBanner = multer({
+  storage: createStorage("banners"), // Use custom storage for banners
+  fileFilter: avatarFilter, // Apply filter for banners (can be adjusted)
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max for banners
+});
+
+module.exports = {
+  uploadAvatar,
+  uploadMedia,
+  uploadBanner,
 };
