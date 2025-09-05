@@ -11,10 +11,12 @@ const {
 // 🔔 Emit helper
 const emitNotificationIfOnline = async (userId, notification) => {
   try {
+    const io = getIO();
+    // Primary: per-user room
+    io.to(`user:${userId}`).emit("notification", notification);
+    // Fallback: direct socket id, if present
     const socketId = await getSocketIdByUserId(userId);
-    if (socketId) {
-      getIO().to(socketId).emit("notification", notification);
-    }
+    if (socketId) io.to(socketId).emit("notification", notification);
   } catch (err) {
     console.error("❌ emitNotificationIfOnline error:", err.message);
   }
@@ -23,7 +25,11 @@ const emitNotificationIfOnline = async (userId, notification) => {
 // 🔔 Create and emit a new notification
 const createNotification = async (req, res) => {
   try {
-    const { user_id, type, content, link, data, additional_info } = req.body;
+    // you can also prefer the authenticated user:
+    const uid = req.body.user_id || req.user?.user_id;
+    const { type, content, link, data, additional_info } = req.body;
+
+    if (!uid) return res.status(400).json({ error: "Missing user_id" });
 
     if (!Object.values(NotificationTypes).includes(type)) {
       return res
@@ -33,26 +39,28 @@ const createNotification = async (req, res) => {
 
     const finalContent =
       content || getDefaultNotificationContent(type, data || {});
-
     const result = await pool.query(
-      `
-      INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data, additional_info)
-      VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
-      RETURNING *
-      `,
+      `INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data, additional_info)
+       VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
+       RETURNING *`,
       [
-        userId,
+        uid,
         type,
         finalContent,
         link || null,
         JSON.stringify(data || {}),
-        additional_info,
+        additional_info || null,
       ]
     );
 
     const notification = result.rows[0];
-    await emitNotificationIfOnline(user_id, notification);
+    // make sure client gets an object for data
+    notification.data =
+      typeof notification.data === "string"
+        ? JSON.parse(notification.data)
+        : notification.data || {};
 
+    await emitNotificationIfOnline(uid, notification);
     res.status(201).json(notification);
   } catch (err) {
     console.error("❌ Error creating notification:", err);

@@ -4,6 +4,7 @@
 // This file is part of the Zone 25 project, which is licensed under the GNU General Public License v3.0.
 
 // ─────────────────────────────────────────────
+// src/config/socket.js
 const pool = require("./db");
 const jwt = require("jsonwebtoken");
 const redis = require("./redis");
@@ -16,65 +17,56 @@ module.exports = {
     const { Server } = require("socket.io");
 
     ioInstance = new Server(server, {
-      cors: {
-        origin: "http://localhost:3000",
-        credentials: true,
-      },
+      cors: { origin: "http://localhost:3000", credentials: true },
     });
 
     ioInstance.on("connection", async (socket) => {
+      let userId = null;
+
       try {
         const cookie = socket.handshake.headers.cookie || "";
         const match = cookie.match(/authToken=([^;]+)/);
-
         if (match) {
-          const token = match[1];
-
-          const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-          const userId = decoded.user_id;
-
-          if (userId) {
-            socket.userId = userId;
-            await presenceService.setUserOnline(userId);
-            await redis.set(`presence:${userId}`, socket.id);
-            await redis.expire(`presence:${userId}`, 300); // 5 minutes expiry
-            await broadcastPresenceToFriends(userId, "online");
-          }
+          const decoded = jwt.verify(match[1], process.env.JWT_SECRET);
+          userId = decoded.user_id || null;
         }
       } catch (err) {
         console.warn("⚠️ Socket auth error:", err.message);
       }
 
-      socket.on("joinRoom", (conversationId) => {
-        socket.join(conversationId);
-      });
+      if (!userId) {
+        // Optional: silently return instead of disconnecting
+        // socket.disconnect(true);
+        return;
+      }
 
+      socket.userId = userId;
+
+      // presence map + keep it fresh
+      await presenceService.setUserOnline(userId);
+      await redis.set(`presence:${userId}`, socket.id);
+      await redis.expire(`presence:${userId}`, 300);
+
+      // ✅ stable per-user room
+      socket.join(`user:${userId}`);
+
+      const keepAlive = setInterval(() => {
+        redis.expire(`presence:${userId}`, 300).catch(() => {});
+      }, 60_000);
+
+      socket.on("joinRoom", (conversationId) => socket.join(conversationId));
       socket.on("typing", ({ conversationId, sender }) => {
         socket.to(conversationId).emit("showTyping", sender);
       });
-
       socket.on("sendReactionUpdate", ({ conversationId, data }) => {
         if (!conversationId || !data) return;
         socket.to(conversationId).emit("reactionUpdated", data);
       });
 
-      socket.on("reconnect", async () => {
-        try {
-          await presenceService.setUserOnline(socket.userId);
-          await broadcastPresenceToFriends(socket.userId, "online");
-        } catch (err) {
-          console.error("Reconnect presence error:", err);
-        }
-      });
-
       socket.on("disconnect", async () => {
-        const userId = socket.userId;
-        if (userId) {
-          await redis.del(`presence:${userId}`);
-          await presenceService.setUserOffline(userId);
-          await broadcastPresenceToFriends(userId, "offline");
-        }
+        clearInterval(keepAlive);
+        await redis.del(`presence:${userId}`);
+        await presenceService.setUserOffline(userId);
       });
     });
 
@@ -82,15 +74,13 @@ module.exports = {
   },
 
   getIO() {
-    if (!ioInstance) {
-      throw new Error("Socket.IO not initialized");
-    }
+    if (!ioInstance) throw new Error("Socket.IO not initialized");
     return ioInstance;
   },
 
   async getOnlineUsers() {
     const keys = await redis.keys("presence:*");
-    return keys.map((key) => key.split(":")[1]);
+    return keys.map((k) => k.split(":")[1]);
   },
 
   async getSocketIdByUserId(userId) {

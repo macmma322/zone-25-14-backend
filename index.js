@@ -31,6 +31,9 @@ app.get("/", (req, res) => {
   res.send("🔥 Welcome to Zone 25-14 API");
 });
 
+// Dev-friendly (trust local/loopback addresses)
+app.set("trust proxy", ["loopback", "linklocal", "uniquelocal"]);
+
 //////////////////////////////////////////////////
 // ▪️ Database + Socket.IO + Server Init
 //////////////////////////////////////////////////

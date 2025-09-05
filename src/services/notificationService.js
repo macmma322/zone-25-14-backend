@@ -1,14 +1,11 @@
-// File: src/services/notificationService.js
-// Description: Safely sends notifications to users and emits real-time updates via Socket.IO
-
+// src/services/notificationService.js
 const pool = require("../config/db");
-const { getIO, getSocketIdByUserId } = require("../config/socket");
+const { getIO } = require("../config/socket");
 const NotificationTypes = require("../models/notificationModel");
 const {
   getDefaultNotificationContent,
 } = require("../utils/notificationHelpers");
 
-// 🔔 Reusable function to send a notification
 const sendNotification = async (
   userId,
   type,
@@ -28,10 +25,12 @@ const sendNotification = async (
     const finalContent =
       content || getDefaultNotificationContent(type, data || {});
 
-    const result = await pool.query(
+    const {
+      rows: [notification],
+    } = await pool.query(
       `INSERT INTO notifications (user_id, type, content, is_read, created_at, link, data, additional_info)
-      VALUES ($1, $2, $3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
-      RETURNING *`,
+       VALUES ($1,$2,$3, FALSE, CURRENT_TIMESTAMP, $4, $5, $6)
+       RETURNING *`,
       [
         userId,
         type,
@@ -42,16 +41,11 @@ const sendNotification = async (
       ]
     );
 
-    const notification = result.rows[0];
-
-    // Parse back to object before emitting
+    // ensure data is an object for the client
     notification.data = data;
 
-    const socketId = await getSocketIdByUserId(userId);
-    if (socketId) {
-      const io = getIO();
-      io.to(socketId).emit("notification", notification);
-    }
+    const io = getIO();
+    io.to(`user:${userId}`).emit("notification", notification); // ← room emit
 
     return notification;
   } catch (err) {
@@ -72,7 +66,6 @@ async function updateNotificationStatusByRequestId(requestId, status) {
     if (result.rowCount === 0) {
       throw new Error(`❌ No notification found with requestId: ${requestId}`);
     }
-
     return true;
   } catch (err) {
     console.error("❌ Error updating notification status:", err);
