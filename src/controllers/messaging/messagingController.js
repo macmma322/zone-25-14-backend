@@ -23,6 +23,25 @@ const {
   generateAdditionalInfo,
 } = require("../../utils/notificationHelpers");
 
+// ✅ MARK Conversation as Read
+const markConversationRead = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const { id } = req.params;
+
+    await pool.query(
+      `UPDATE public.conversation_members
+       SET last_read_at = NOW()
+       WHERE conversation_id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("markConversationRead error:", err);
+    res.status(500).json({ error: "Failed to mark read" });
+  }
+};
+
 // ✅ CREATE Conversation
 const createConversation = async (req, res) => {
   try {
@@ -76,6 +95,76 @@ const createConversation = async (req, res) => {
   } catch (err) {
     console.error("createConversation error:", err);
     return res.status(500).json({ error: "Failed to create conversation" });
+  }
+};
+
+// ✅ LIST Conversations
+const listConversations = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        c.conversation_id,
+        c.is_group,
+        c.group_name,
+
+        -- last message (may be NULL)
+        lm.message_id    AS last_message_id,
+        lm.content       AS last_message_text,
+        lm.sent_at       AS last_message_time,
+        lm.media_type    AS last_message_media_type,
+
+        -- other user for 1:1
+        other_user.user_id        AS other_user_id,
+        other_user.username       AS other_username,
+        other_user.profile_picture AS other_avatar,
+
+        -- unread counter since viewer's last_read_at
+        COALESCE((
+          SELECT COUNT(*)
+          FROM public.messages m
+          WHERE m.conversation_id = c.conversation_id
+            AND m.is_deleted = false
+            AND m.sent_at > COALESCE(cm.last_read_at, 'epoch'::timestamptz)
+            AND m.sender_id <> $1
+        ), 0) AS unread_count
+
+      FROM public.conversations c
+      JOIN public.conversation_members cm
+        ON cm.conversation_id = c.conversation_id
+       AND cm.user_id = $1
+
+      -- last message lateral
+      LEFT JOIN LATERAL (
+        SELECT m.*
+        FROM public.messages m
+        WHERE m.conversation_id = c.conversation_id
+          AND m.is_deleted = false
+        ORDER BY m.sent_at DESC
+        LIMIT 1
+      ) lm ON true
+
+      -- other user (for 1:1)
+      LEFT JOIN LATERAL (
+        SELECT u.user_id, u.username, u.profile_picture
+        FROM public.conversation_members cmx
+        JOIN public.users u ON u.user_id = cmx.user_id
+        WHERE cmx.conversation_id = c.conversation_id
+          AND cmx.user_id <> $1
+        LIMIT 1
+      ) other_user ON true
+
+      ORDER BY COALESCE(lm.sent_at, c.created_at) DESC NULLS LAST
+      `,
+      [userId]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("listConversations error:", err);
+    res.status(500).json({ error: "Failed to load conversations" });
   }
 };
 
@@ -144,10 +233,11 @@ const sendMessage = async (req, res) => {
     );
 
     const senderRes = await pool.query(
-      `SELECT username FROM users WHERE user_id = $1`,
+      `SELECT username, profile_picture FROM users WHERE user_id = $1`,
       [user_id]
     );
     const username = senderRes.rows[0]?.username || "Unknown";
+    const avatar = senderRes.rows[0]?.profile_picture || null;
 
     let replyToMessage = null;
     if (replyToMessageId) {
@@ -188,6 +278,7 @@ const sendMessage = async (req, res) => {
       conversation_id: conversationId,
       sender_id: user_id,
       username,
+      avatar,
       content: message.content,
       sent_at: message.sent_at,
       media_url: message.media_url, // This will now correctly have the leading slash if it came in that way
@@ -256,6 +347,7 @@ const getMessages = async (req, res) => {
         m.message_id,
         m.sender_id,
         u.username,
+        u.profile_picture AS sender_avatar,
         m.content,
         m.sent_at,
         m.reply_to_id,
@@ -291,7 +383,7 @@ const getMessages = async (req, res) => {
           mr.message_id,
           mr.user_id,
           u.username,
-          u.profile_picture AS avatar, -- <--- ADD THIS LINE to select the avatar
+          u.profile_picture AS avatar,
           mr.reaction,
           mr.reacted_at
         FROM message_reactions mr
@@ -320,6 +412,7 @@ const getMessages = async (req, res) => {
       message_id: msg.message_id,
       sender_id: msg.sender_id,
       username: msg.username,
+      avatar: msg.sender_avatar || null,
       content: msg.content,
       sent_at: msg.sent_at,
       reply_to_id: msg.reply_to_id,
@@ -348,4 +441,6 @@ module.exports = {
   addMember,
   sendMessage,
   getMessages,
+  listConversations,
+  markConversationRead,
 };

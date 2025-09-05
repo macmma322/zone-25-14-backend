@@ -22,6 +22,7 @@ const getRelationshipStatus = async (req, res) => {
     const viewerId = req.user.user_id;
     const { username } = req.params;
 
+    // 1) find target user
     const userRes = await pool.query(
       `SELECT user_id FROM users WHERE username = $1`,
       [username]
@@ -30,24 +31,38 @@ const getRelationshipStatus = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
 
     const targetId = userRes.rows[0].user_id;
+
+    // viewing yourself
     if (viewerId === targetId) {
       return res.status(200).json({
         targetId,
         areFriends: false,
         hasPendingFriendRequest: false,
         theySentRequest: false,
+        requestId: null,
+        // You can’t DM yourself; keep false.
         canMessage: false,
       });
     }
 
+    // 2) friendship
     const friendRes = await pool.query(
-      `SELECT 1 FROM friends WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)) AND is_removed = false AND is_blocked = false`,
+      `SELECT 1
+         FROM friends
+        WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))
+          AND is_removed = false AND is_blocked = false
+        LIMIT 1`,
       [viewerId, targetId]
     );
     const areFriends = friendRes.rows.length > 0;
 
+    // 3) pending friend request (either direction)
     const requestRes = await pool.query(
-      `SELECT request_id, sender_id, receiver_id FROM friend_requests WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)) AND status = 'pending' LIMIT 1`,
+      `SELECT request_id, sender_id, receiver_id
+         FROM friend_requests
+        WHERE ((sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1))
+          AND status = 'pending'
+        LIMIT 1`,
       [viewerId, targetId]
     );
     const request = requestRes.rows[0];
@@ -55,13 +70,25 @@ const getRelationshipStatus = async (req, res) => {
     const theySentRequest = request?.sender_id === targetId;
     const requestId = request?.request_id ?? null;
 
+    // 4) privacy: allow_messages (default TRUE if no row)
+    const privacyRes = await pool.query(
+      `SELECT COALESCE(allow_messages, TRUE) AS allow_messages
+         FROM privacy_settings
+        WHERE user_id = $1`,
+      [targetId]
+    );
+    const allowMessages = privacyRes.rows[0]?.allow_messages ?? true;
+
+    // canMessage means: either already friends (full DM), OR this user allows message requests
+    const canMessage = areFriends || allowMessages;
+
     return res.status(200).json({
       targetId,
       areFriends,
       hasPendingFriendRequest,
       theySentRequest,
       requestId,
-      canMessage: areFriends,
+      canMessage,
     });
   } catch (err) {
     console.error("getRelationshipStatus error:", err);

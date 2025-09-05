@@ -82,18 +82,35 @@ const getProfileOverview = async (req, res) => {
     );
 
     res.status(200).json({
+      // Send the user fields directly as expected by the frontend User type
+      user_id: user.user_id, // Add user_id as it's in the User type
       username: user.username,
       email: user.email,
-      avatar: user.profile_picture,
+      profile_picture: user.profile_picture, // ✅ Change from 'avatar' to 'profile_picture'
+      biography: user.biography, // Add biography
+      display_name: user.display_name, // Add display_name
+      role_level_id: user.role_level_id, // Add role_level_id
       points: user.points,
-      role: user.role_name,
       created_at: user.created_at,
-      discount: `${user.discount_percentage}%`,
+      role: user.role_name, // Map role_name to role
       next_rank: nextRank,
+      // You'll need to fetch store_credit and birthday from the DB if your User type expects them
+      // store_credit: user.store_credit,
+      // birthday: user.birthday,
+      // ... and any other User type properties that aren't currently being returned
+
+      // The following are additional data points for the dashboard,
+      // which might not be strictly part of the base `User` type,
+      // but are useful for this specific overview endpoint.
+      // If your `User` type is meant to *only* include core user data,
+      // you might want to return this as an "Overview" type instead of "User".
+      // For now, let's keep them here as long as the frontend can handle them.
+      discount: `${user.discount_percentage}%`,
       subscriptions: subs.rows,
       cart_items: parseInt(cartCount.rows[0].count),
       wishlist_items: parseInt(wishlistCount.rows[0].count),
       linkedAccounts: linkedRes.rows,
+      // socials: // You also have a getUserSocialLinks endpoint, consider integrating here
     });
   } catch (err) {
     console.error("Profile Hub Error:", err.message);
