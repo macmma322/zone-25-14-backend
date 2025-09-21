@@ -21,6 +21,20 @@ const messageRequestController = require("../../controllers/messaging/messageReq
 
 const { protectRoute } = require("../../middleware/authMiddleware");
 
+const {
+  getConversation, // NEW
+  listMembers, // NEW
+  inviteMembers, // NEW (bulk add)
+  leaveConversation, // NEW
+  removeMember, // NEW (kick)
+  changeMemberRole, // NEW (promote/demote)
+  transferOwnership, // NEW
+  updateConversation, // NEW (name/avatar)
+  muteConversation, // NEW (per user)
+  pinConversation, // NEW (per user)
+  deleteConversation, // NEW (owner only)
+} = require("../../controllers/messaging/messagingController");
+
 // All routes protected
 router.use(protectRoute);
 
@@ -67,5 +81,50 @@ router.post("/messages", sendMessage);
 
 // 🔹 Fetch messages in a conversation
 router.get("/messages/:conversationId", getMessages);
+
+// All routes protected
+router.use(protectRoute);
+
+// Conversations
+router.get("/conversations/list", listConversations);
+router.get("/conversations/:id", getConversation); // ← details
+router.get("/conversations/:id/members", listMembers); // ← roster
+
+router.post("/conversations", requireMessagingAllowed(), createConversation);
+router.post("/conversations/:id/read", markConversationRead);
+
+// Membership mgmt
+router.post("/conversations/:id/invite", inviteMembers); // ← add many
+router.post("/conversations/:id/leave", leaveConversation);
+router.post("/conversations/:id/remove-member", removeMember);
+router.post("/conversations/:id/role", changeMemberRole);
+router.post("/conversations/:id/transfer-ownership", transferOwnership);
+
+// Settings (group)
+router.patch("/conversations/:id", updateConversation); // name/avatar
+router.post("/conversations/:id/mute", muteConversation); // per user
+router.post("/conversations/:id/pin", pinConversation); // per user
+router.delete("/conversations/:id", deleteConversation); // owner only
+
+// Inbox + messages (as you have)
+router.get("/requests", messageRequestController.getIncomingRequests);
+router.post(
+  "/requests",
+  requireMessagingAllowed(),
+  messageRequestController.createMessageRequest
+);
+router.post(
+  "/requests/:id/accept",
+  messageRequestController.acceptMessageRequest
+);
+router.post(
+  "/requests/:id/reject",
+  messageRequestController.declineMessageRequest
+);
+
+router.post("/messages", sendMessage);
+router.get("/messages/:conversationId", getMessages);
+
+module.exports = router;
 
 module.exports = router;

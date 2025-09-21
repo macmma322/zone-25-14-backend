@@ -45,9 +45,10 @@ const markConversationRead = async (req, res) => {
 // ✅ CREATE Conversation
 const createConversation = async (req, res) => {
   try {
-    const { isGroup, groupName, memberIds } = req.body;
+    const { isGroup, groupName, groupAvatar, memberIds = [] } = req.body; // ← groupAvatar
     const user_id = req.user.user_id;
 
+    // Reuse existing 1:1 reuse logic
     if (!isGroup && memberIds.length === 1) {
       const existing = await pool.query(
         `SELECT c.conversation_id
@@ -59,7 +60,6 @@ const createConversation = async (req, res) => {
          LIMIT 1`,
         [user_id, memberIds[0]]
       );
-
       if (existing.rows.length) {
         return res.status(200).json({
           conversation: { conversation_id: existing.rows[0].conversation_id },
@@ -68,27 +68,81 @@ const createConversation = async (req, res) => {
       }
     }
 
+    // create base conversation
     const convo = await Conversation.createConversation(
       isGroup,
       isGroup ? groupName : null,
       user_id
     );
 
+    // (NEW) optional avatar
+    if (isGroup && groupAvatar) {
+      await pool.query(
+        `UPDATE conversations SET group_avatar = $1 WHERE conversation_id = $2`,
+        [groupAvatar, convo.conversation_id]
+      );
+      convo.group_avatar = groupAvatar;
+    }
+
+    // add creator
     await ConversationMember.addMemberToConversation(
       convo.conversation_id,
       user_id,
       "owner"
     );
 
-    if (Array.isArray(memberIds)) {
-      for (const id of memberIds) {
-        if (id !== user_id) {
-          await ConversationMember.addMemberToConversation(
-            convo.conversation_id,
-            id
-          );
+    // add invited members
+    const uniqueMembers = Array.from(
+      new Set(memberIds.filter((id) => id && id !== user_id))
+    );
+
+    for (const id of uniqueMembers) {
+      await ConversationMember.addMemberToConversation(
+        convo.conversation_id,
+        id
+      );
+    }
+
+    // (NEW) realtime + notifications for invitees
+    try {
+      const { rows: creatorRow } = await pool.query(
+        `SELECT username FROM users WHERE user_id = $1`,
+        [user_id]
+      );
+      const creatorName = creatorRow[0]?.username || "Someone";
+
+      // Socket emit to each invited user so their sidebar refreshes instantly
+      const { getSocketIdByUserId, getIO } = require("../../config/socket");
+      const io = getIO();
+
+      for (const memberId of uniqueMembers) {
+        const sid = await getSocketIdByUserId(memberId);
+        if (sid) {
+          io.to(sid).emit("groupCreated", {
+            conversation_id: convo.conversation_id,
+            is_group: true,
+            group_name: convo.group_name,
+            group_avatar: convo.group_avatar || null,
+            created_by: user_id,
+          });
         }
+
+        // Optional: send a “you were added” notification
+        const content = groupName
+          ? `${creatorName} added you to ${groupName}`
+          : `${creatorName} added you to a group chat`;
+        await sendNotification(
+          memberId,
+          "message", // reuse "message" type, or add a "group" type if you prefer
+          content,
+          `/chat/${convo.conversation_id}`,
+          { kind: "group_invite" },
+          null
+        );
       }
+    } catch (e) {
+      // non-fatal
+      console.warn("createConversation notify error:", e.message);
     }
 
     return res.status(201).json({ conversation: convo });
@@ -109,19 +163,17 @@ const listConversations = async (req, res) => {
         c.conversation_id,
         c.is_group,
         c.group_name,
+        c.group_avatar,              -- ← add this
 
-        -- last message (may be NULL)
         lm.message_id    AS last_message_id,
         lm.content       AS last_message_text,
         lm.sent_at       AS last_message_time,
         lm.media_type    AS last_message_media_type,
 
-        -- other user for 1:1
         other_user.user_id        AS other_user_id,
         other_user.username       AS other_username,
         other_user.profile_picture AS other_avatar,
 
-        -- unread counter since viewer's last_read_at
         COALESCE((
           SELECT COUNT(*)
           FROM public.messages m
@@ -136,7 +188,6 @@ const listConversations = async (req, res) => {
         ON cm.conversation_id = c.conversation_id
        AND cm.user_id = $1
 
-      -- last message lateral
       LEFT JOIN LATERAL (
         SELECT m.*
         FROM public.messages m
@@ -146,7 +197,6 @@ const listConversations = async (req, res) => {
         LIMIT 1
       ) lm ON true
 
-      -- other user (for 1:1)
       LEFT JOIN LATERAL (
         SELECT u.user_id, u.username, u.profile_picture
         FROM public.conversation_members cmx
@@ -216,22 +266,26 @@ const sendMessage = async (req, res) => {
     const { conversationId, content, replyToMessageId, media_url, media_type } =
       req.body;
 
-    // IMPORTANT CHANGE HERE:
-    // If media_url is provided, assume it's already the correct, publicly accessible URL
-    // generated by the messageUploadRoutes.js.
-    // Do NOT reconstruct the path here.
-    const urlToSaveToDb = media_url || null; // Simply use it as is if provided
+    // (NEW) reject truly-empty messages
+    const trimmed = (content || "").trim();
+    if (!trimmed && !media_url) {
+      return res
+        .status(400)
+        .json({ error: "Message must include text or media." });
+    }
 
-    // Save the media URL in the database
+    // Save message
+    const urlToSaveToDb = media_url || null;
     const message = await Message.sendMessage(
       conversationId,
       user_id,
-      content || "",
+      trimmed,
       replyToMessageId || null,
-      urlToSaveToDb, // Save the URL directly as received from the frontend
+      urlToSaveToDb,
       media_type || null
     );
 
+    // sender profile
     const senderRes = await pool.query(
       `SELECT username, profile_picture FROM users WHERE user_id = $1`,
       [user_id]
@@ -239,6 +293,15 @@ const sendMessage = async (req, res) => {
     const username = senderRes.rows[0]?.username || "Unknown";
     const avatar = senderRes.rows[0]?.profile_picture || null;
 
+    // conversation meta (for notification phrasing)
+    const convMeta = await pool.query(
+      `SELECT is_group, group_name FROM conversations WHERE conversation_id = $1`,
+      [conversationId]
+    );
+    const isGroup = !!convMeta.rows[0]?.is_group;
+    const groupName = convMeta.rows[0]?.group_name || null;
+
+    // reply payload (unchanged)
     let replyToMessage = null;
     if (replyToMessageId) {
       const replyRes = await pool.query(
@@ -258,11 +321,13 @@ const sendMessage = async (req, res) => {
       }
     }
 
+    // members
     const memberRes = await pool.query(
       `SELECT user_id FROM conversation_members WHERE conversation_id = $1`,
       [conversationId]
     );
 
+    // keep friend "lastMessageTime" for 1:1s
     if (memberRes.rows.length === 2) {
       const friendId = memberRes.rows.find(
         (m) => m.user_id !== user_id
@@ -273,6 +338,7 @@ const sendMessage = async (req, res) => {
       }
     }
 
+    // full payload to room
     const fullMessage = {
       message_id: message.message_id,
       conversation_id: conversationId,
@@ -281,34 +347,36 @@ const sendMessage = async (req, res) => {
       avatar,
       content: message.content,
       sent_at: message.sent_at,
-      media_url: message.media_url, // This will now correctly have the leading slash if it came in that way
+      media_url: message.media_url,
       media_type: message.media_type,
       reply_to_message: replyToMessage || undefined,
     };
 
-    getIO().to(conversationId).emit("receiveMessage", fullMessage);
-
     const io = getIO();
+    io.to(conversationId).emit("receiveMessage", fullMessage);
+
+    // notify offline members with context (group name)
     const room = io.sockets.adapter.rooms.get(conversationId);
     const socketsInRoom = room ? Array.from(room) : [];
+    const { getSocketIdByUserId } = require("../../config/socket");
 
     for (const member of memberRes.rows) {
       const targetId = member.user_id;
       if (targetId === user_id) continue;
 
-      const targetSocketId =
-        await require("../../config/socket").getSocketIdByUserId(targetId);
+      const targetSocketId = await getSocketIdByUserId(targetId);
       const isViewingRoom =
         targetSocketId && socketsInRoom.includes(targetSocketId);
 
       if (!isViewingRoom) {
         const preview =
-          content.length > 40 ? content.slice(0, 40) + "..." : content;
+          trimmed.length > 40 ? trimmed.slice(0, 40) + "..." : trimmed;
         const additional_info = generateAdditionalInfo(
           replyToMessageId ? "reply" : "message",
           { preview }
         );
 
+        // 👇 pass eventName for groups so content becomes "macmma322 sent a message to The Cartel"
         await sendNotification(
           targetId,
           replyToMessageId ? "reply" : "message",
@@ -316,10 +384,11 @@ const sendMessage = async (req, res) => {
             replyToMessageId ? "reply" : "message",
             {
               senderName: username,
+              eventName: isGroup ? groupName : undefined,
             }
           ),
           `/chat/${conversationId}`,
-          {},
+          { isGroup, groupName },
           additional_info
         );
       }
@@ -436,6 +505,314 @@ const getMessages = async (req, res) => {
   }
 };
 
+// GET /conversations/:id
+const getConversation = async (req, res) => {
+  const userId = req.user.user_id;
+  const { id } = req.params;
+  const q = `
+    SELECT c.conversation_id, c.is_group, c.group_name, c.group_avatar
+    FROM conversations c
+    JOIN conversation_members cm ON cm.conversation_id = c.conversation_id AND cm.user_id = $1
+    WHERE c.conversation_id = $2
+    LIMIT 1`;
+  const { rows } = await pool.query(q, [userId, id]);
+  if (!rows.length) return res.status(404).json({ error: "Not found" });
+  res.json(rows[0]);
+};
+
+// GET /conversations/:id/members
+const listMembers = async (req, res) => {
+  const userId = req.user.user_id;
+  const { id } = req.params;
+  // ensure membership
+  const ok = await pool.query(
+    `SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, userId]
+  );
+  if (!ok.rows.length) return res.status(403).json({ error: "Forbidden" });
+
+  const { rows } = await pool.query(
+    `SELECT cm.user_id, cm.role, u.username, u.profile_picture AS avatar
+     FROM conversation_members cm
+     JOIN users u ON u.user_id = cm.user_id
+     WHERE cm.conversation_id = $1
+     ORDER BY CASE cm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'moderator' THEN 2 ELSE 3 END, u.username`,
+    [id]
+  );
+  res.json(rows);
+};
+
+// POST /conversations/:id/invite  { memberIds: string[] }
+const inviteMembers = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+  const { memberIds = [] } = req.body;
+
+  // perms: owner/admin can invite
+  const { rows: meRows } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  if (!meRows.length || !["owner", "admin"].includes(meRows[0].role))
+    return res.status(403).json({ error: "Insufficient permissions" });
+
+  const unique = Array.from(new Set(memberIds)).filter(Boolean);
+  for (const uid of unique) {
+    const exists = await pool.query(
+      `SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+      [id, uid]
+    );
+    if (!exists.rows.length) {
+      await ConversationMember.addMemberToConversation(id, uid);
+    }
+  }
+
+  // realtime: roster changed
+  const io = getIO();
+  io.to(id).emit("membersUpdated", { conversation_id: id });
+
+  // notify new members
+  const { rows: conv } = await pool.query(
+    `SELECT group_name, is_group FROM conversations WHERE conversation_id=$1`,
+    [id]
+  );
+  const { rows: who } = await pool.query(
+    `SELECT username FROM users WHERE user_id=$1`,
+    [actorId]
+  );
+  const actorName = who[0]?.username || "Someone";
+
+  for (const uid of unique) {
+    await sendNotification(
+      uid,
+      "message",
+      conv[0].is_group
+        ? `${actorName} added you to ${conv[0].group_name || "a group chat"}`
+        : `${actorName} started a chat with you`,
+      `/chat/${id}`,
+      { kind: "group_invite" }
+    );
+  }
+
+  return res.json({ ok: true });
+};
+
+// POST /conversations/:id/leave
+const leaveConversation = async (req, res) => {
+  const userId = req.user.user_id;
+  const { id } = req.params;
+
+  const { rows: mine } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, userId]
+  );
+  if (!mine.length) return res.status(404).json({ error: "Not a member" });
+
+  // owner must transfer before leaving
+  if (mine[0].role === "owner") {
+    return res
+      .status(400)
+      .json({ error: "Owner must transfer ownership before leaving." });
+  }
+
+  await pool.query(
+    `DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, userId]
+  );
+
+  getIO().to(id).emit("memberLeft", { conversation_id: id, user_id: userId });
+
+  return res.json({ ok: true });
+};
+
+// POST /conversations/:id/remove-member  { memberId }
+const removeMember = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+  const { memberId } = req.body;
+
+  const { rows: roles } = await pool.query(
+    `SELECT user_id, role FROM conversation_members WHERE conversation_id=$1 AND user_id IN ($2,$3)`,
+    [id, actorId, memberId]
+  );
+  const me = roles.find((r) => r.user_id === actorId);
+  const target = roles.find((r) => r.user_id === memberId);
+  if (!me) return res.status(403).json({ error: "Forbidden" });
+  if (!target)
+    return res.status(404).json({ error: "Target not in conversation" });
+
+  const canKick =
+    me.role === "owner" ||
+    (me.role === "admin" && !["owner", "admin"].includes(target.role));
+  if (!canKick)
+    return res.status(403).json({ error: "Insufficient permissions" });
+
+  await pool.query(
+    `DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, memberId]
+  );
+  getIO()
+    .to(id)
+    .emit("memberRemoved", { conversation_id: id, user_id: memberId });
+
+  return res.json({ ok: true });
+};
+
+// POST /conversations/:id/role  { memberId, role } // role: 'admin'|'moderator'|'member'
+const changeMemberRole = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+  const { memberId, role } = req.body;
+
+  if (!["admin", "moderator", "member"].includes(role))
+    return res.status(400).json({ error: "Invalid role" });
+
+  const { rows: me } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  if (!me.length || me[0].role !== "owner")
+    return res.status(403).json({ error: "Only owner can change roles" });
+
+  await pool.query(
+    `UPDATE conversation_members SET role=$1 WHERE conversation_id=$2 AND user_id=$3`,
+    [role, id, memberId]
+  );
+
+  getIO()
+    .to(id)
+    .emit("roleChanged", { conversation_id: id, user_id: memberId, role });
+  res.json({ ok: true });
+};
+
+// POST /conversations/:id/transfer-ownership  { newOwnerId }
+const transferOwnership = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+  const { newOwnerId } = req.body;
+
+  const { rows: me } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  if (!me.length || me[0].role !== "owner")
+    return res.status(403).json({ error: "Only owner can transfer ownership" });
+
+  // new owner must be a member
+  const ok = await pool.query(
+    `SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, newOwnerId]
+  );
+  if (!ok.rows.length)
+    return res.status(400).json({ error: "User not in conversation" });
+
+  await pool.query(
+    `UPDATE conversation_members SET role='admin' WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  await pool.query(
+    `UPDATE conversation_members SET role='owner' WHERE conversation_id=$1 AND user_id=$2`,
+    [id, newOwnerId]
+  );
+
+  getIO().to(id).emit("roleChanged", {
+    conversation_id: id,
+    user_id: newOwnerId,
+    role: "owner",
+  });
+  res.json({ ok: true });
+};
+
+// PATCH /conversations/:id  { groupName?, groupAvatar? }
+const updateConversation = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+  const { groupName, groupAvatar } = req.body;
+
+  const { rows: me } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  if (!me.length || !["owner", "admin", "moderator"].includes(me[0].role))
+    return res.status(403).json({ error: "Insufficient permissions" });
+
+  const fields = [];
+  const vals = [];
+  let i = 1;
+  if (typeof groupName === "string") {
+    fields.push(`group_name=$${i++}`);
+    vals.push(groupName);
+  }
+  if (typeof groupAvatar === "string") {
+    fields.push(`group_avatar=$${i++}`);
+    vals.push(groupAvatar);
+  }
+  if (!fields.length) return res.json({ ok: true });
+
+  vals.push(id);
+  await pool.query(
+    `UPDATE conversations SET ${fields.join(", ")} WHERE conversation_id=$${i}`,
+    vals
+  );
+
+  getIO().to(id).emit("conversationUpdated", {
+    conversation_id: id,
+    groupName,
+    groupAvatar,
+  });
+  res.json({ ok: true });
+};
+
+// POST /conversations/:id/mute  { until?: string | null }
+const muteConversation = async (req, res) => {
+  const userId = req.user.user_id;
+  const { id } = req.params;
+  const { until } = req.body; // ISO string | null
+
+  await pool.query(
+    `UPDATE conversation_members SET muted_until = $1 WHERE conversation_id=$2 AND user_id=$3`,
+    [until ? new Date(until) : null, id, userId]
+  );
+  res.json({ ok: true });
+};
+
+// POST /conversations/:id/pin  { pinned: boolean }
+const pinConversation = async (req, res) => {
+  const userId = req.user.user_id;
+  const { id } = req.params;
+  const { pinned } = req.body;
+
+  await pool.query(
+    `UPDATE conversation_members SET pinned = $1 WHERE conversation_id=$2 AND user_id=$3`,
+    [!!pinned, id, userId]
+  );
+  res.json({ ok: true });
+};
+
+// DELETE /conversations/:id
+const deleteConversation = async (req, res) => {
+  const actorId = req.user.user_id;
+  const { id } = req.params;
+
+  const { rows: me } = await pool.query(
+    `SELECT role FROM conversation_members WHERE conversation_id=$1 AND user_id=$2`,
+    [id, actorId]
+  );
+  if (!me.length || me[0].role !== "owner")
+    return res
+      .status(403)
+      .json({ error: "Only owner can delete the conversation" });
+
+  await pool.query(
+    `DELETE FROM conversation_members WHERE conversation_id=$1`,
+    [id]
+  );
+  await pool.query(`DELETE FROM conversations WHERE conversation_id=$1`, [id]);
+
+  getIO().to(id).emit("conversationDeleted", { conversation_id: id });
+  res.json({ ok: true });
+};
+
 module.exports = {
   createConversation,
   addMember,
@@ -443,4 +820,15 @@ module.exports = {
   getMessages,
   listConversations,
   markConversationRead,
+  getConversation,
+  listMembers,
+  inviteMembers,
+  leaveConversation,
+  removeMember,
+  changeMemberRole,
+  transferOwnership,
+  updateConversation,
+  muteConversation,
+  pinConversation,
+  deleteConversation,
 };
