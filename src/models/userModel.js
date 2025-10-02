@@ -81,10 +81,12 @@ const getUserWithRole = async (userId) => {
 };
 
 const getUsernameById = async (userId) => {
-  const { rows } = await pool.query(`SELECT username FROM users WHERE user_id = $1`, [userId]);
+  const { rows } = await pool.query(
+    `SELECT username FROM users WHERE user_id = $1`,
+    [userId]
+  );
   return rows[0]?.username || "Unknown";
 };
-
 
 module.exports = {
   createUser,
