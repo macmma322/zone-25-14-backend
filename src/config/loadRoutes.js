@@ -1,95 +1,235 @@
 // 🔁 Route Loader for Zone 25-14 Backend
-// Centralizes and registers all API routes
+// Centralizes and registers all API routes, consistently.
 
 const express = require("express");
 
-// ─────────────────────────────────────────────
-// 🔐 Core Auth & Identity
-// ─────────────────────────────────────────────
-const authRoutes = require("../routes/auth/authRoutes");
-const userRoutes = require("../routes/users/usersRoutes");
-const relationshipRoutes = require("../routes/users/relationshipRoutes");
-const presenceRoutes = require("../routes/presenceRoutes");
-const accountRoutes = require("../routes/users/accountsRoutes");
+// Detect an Express Router/middleware function
+function isExpressRouter(x) {
+  return (
+    typeof x === "function" &&
+    typeof x.use === "function" &&
+    typeof x.handle === "function"
+  );
+}
 
-// ─────────────────────────────────────────────
-// 🧍 User Display, Roles, Rewards
-// ─────────────────────────────────────────────
-const titlesRoutes = require("../routes/users/titlesRoutes");
-const badgesRoutes = require("../routes/users/badgesRoutes");
-const activityRoutes = require("../routes/users/activityRoutes");
-const pointsRoutes = require("../routes/points/pointsRoutes");
-const rolesRoutes = require("../routes/roles/rolesRoutes");
+// Safely normalize a module that may export a Router OR a factory returning one
+function normalizeRouter(mod, label) {
+  if (!mod) {
+    throw new Error(`Route module "${label}" exported undefined/null.`);
+  }
 
-// ─────────────────────────────────────────────
-// 🛒 E-Commerce & Orders
-// ─────────────────────────────────────────────
-const productRoutes = require("../routes/products/productRoutes");
-const cartRoutes = require("../routes/cart/cartRoutes");
-const wishlistRoutes = require("../routes/wishlist/wishlistRoutes");
-const orderRoutes = require("../routes/orders/orderRoutes");
+  // If it already looks like an Express router, use it as-is.
+  if (isExpressRouter(mod)) return mod;
 
-// ─────────────────────────────────────────────
-// 📦 Subscriptions & Plans
-// ─────────────────────────────────────────────
-const subscriptionRoutes = require("../routes/subscriptions/subscriptionRoutes");
+  // Some routers export an object (rare) that wraps a router
+  if (typeof mod === "object" && isExpressRouter(mod.router)) return mod.router;
 
-// ─────────────────────────────────────────────
-// 💬 Messaging & Reactions
-// ─────────────────────────────────────────────
-const messagingRoutes = require("../routes/messaging/messagingRoutes");
-const reactionRoutes = require("../routes/messaging/reactionRoutes");
-const messageUploadRoutes = require("../routes/messaging/messageUploadRoutes");
+  // If it's a function but not an Express router, try to treat it as a factory
+  if (typeof mod === "function") {
+    // Heuristic: factory functions typically have 0 declared params.
+    // (Express routers have length 3: req,res,next)
+    if (mod.length === 0) {
+      const maybe = mod();
+      if (isExpressRouter(maybe)) return maybe;
+    }
 
-// ─────────────────────────────────────────────
-// 🔍 Search, Notifications, Misc
-// ─────────────────────────────────────────────
-const searchRoutes = require("../routes/search/searchRoutes");
-const notificationRoutes = require("../routes/notifications/notificationRoutes");
+    // As a fallback, don't invoke unknown functions: explain the problem
+    throw new Error(
+      `Route module "${label}" exported a function that is not an Express router. ` +
+        `Export the router directly (module.exports = router) or a zero-arg factory that returns one.`
+    );
+  }
 
-// ─────────────────────────────────────────────
-// 🕒 Import and run cron jobs for background tasks
-// ─────────────────────────────────────────────
-require("../jobs/expirationNotifications"); // This will automatically run the cron job defined in expirationNotifications.js
+  throw new Error(
+    `Route module "${label}" has invalid export type (${typeof mod}).`
+  );
+}
 
-// ─────────────────────────────────────────────
-// 🔧 Route Registration
-// ─────────────────────────────────────────────
 module.exports = function loadRoutes(app) {
-  // 🔐 Authentication
-  app.use("/api/auth", authRoutes);
+  // ─────────────────────────────────────────────
+  // 🔐 Auth & Identity
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/auth",
+    normalizeRouter(
+      require("../routes/auth/authRoutes"),
+      "routes/auth/authRoutes"
+    )
+  );
+  app.use(
+    "/api/auth",
+    normalizeRouter(
+      require("../routes/auth/passwordResetRoutes"),
+      "routes/auth/passwordResetRoutes"
+    )
+  );
 
-  // 👤 User Systems
-  app.use("/api/users", userRoutes);
-  app.use("/api/users", relationshipRoutes);
-  app.use("/api/presence", presenceRoutes);
-  app.use("/api/users/accounts", accountRoutes);
+  // ─────────────────────────────────────────────
+  // 👤 Users, Accounts, Presence
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/users",
+    normalizeRouter(
+      require("../routes/users/usersRoutes"),
+      "routes/users/usersRoutes"
+    )
+  );
+  app.use(
+    "/api/users/accounts",
+    normalizeRouter(
+      require("../routes/users/accountsRoutes"),
+      "routes/users/accountsRoutes"
+    )
+  );
+  app.use(
+    "/api/users",
+    normalizeRouter(
+      require("../routes/users/relationshipRoutes"),
+      "routes/users/relationshipRoutes"
+    )
+  );
+  app.use(
+    "/api/presence",
+    normalizeRouter(
+      require("../routes/presenceRoutes"),
+      "routes/presenceRoutes"
+    )
+  );
 
-  // 🎖️ Display, Progression, Status
-  app.use("/api/users/titles", titlesRoutes);
-  app.use("/api/users/badges", badgesRoutes);
-  app.use("/api/users/activity", activityRoutes);
-  app.use("/api/points", pointsRoutes);
-  app.use("/api/roles", rolesRoutes);
+  // ─────────────────────────────────────────────
+  // 🏅 Titles, Badges, Activity, Roles, Points
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/users/titles",
+    normalizeRouter(
+      require("../routes/users/titlesRoutes"),
+      "routes/users/titlesRoutes"
+    )
+  );
+  app.use(
+    "/api/users/badges",
+    normalizeRouter(
+      require("../routes/users/badgesRoutes"),
+      "routes/users/badgesRoutes"
+    )
+  );
+  app.use(
+    "/api/users/activity",
+    normalizeRouter(
+      require("../routes/users/activityRoutes"),
+      "routes/users/activityRoutes"
+    )
+  );
+  app.use(
+    "/api/roles",
+    normalizeRouter(
+      require("../routes/roles/rolesRoutes"),
+      "routes/roles/rolesRoutes"
+    )
+  );
+  app.use(
+    "/api/points",
+    normalizeRouter(
+      require("../routes/points/pointsRoutes"),
+      "routes/points/pointsRoutes"
+    )
+  );
 
+  // ─────────────────────────────────────────────
   // 🛍️ E-Commerce
-  app.use("/api", productRoutes);
-  app.use("/api", cartRoutes);
-  app.use("/api", wishlistRoutes);
-  app.use("/api/orders", orderRoutes);
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/products",
+    normalizeRouter(
+      require("../routes/products/productRoutes"),
+      "routes/products/productRoutes"
+    )
+  );
+  app.use(
+    "/api/cart",
+    normalizeRouter(
+      require("../routes/cart/cartRoutes"),
+      "routes/cart/cartRoutes"
+    )
+  );
+  app.use(
+    "/api/wishlist",
+    normalizeRouter(
+      require("../routes/wishlist/wishlistRoutes"),
+      "routes/wishlist/wishlistRoutes"
+    )
+  );
+  app.use(
+    "/api/orders",
+    normalizeRouter(
+      require("../routes/orders/orderRoutes"),
+      "routes/orders/orderRoutes"
+    )
+  );
 
-  // 📦 Subscriptions
-  app.use("/api", subscriptionRoutes);
+  // ─────────────────────────────────────────────
+  // 📦 Subscriptions & Newsletter
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/subscriptions",
+    normalizeRouter(
+      require("../routes/subscriptions/subscriptionRoutes"),
+      "routes/subscriptions/subscriptionRoutes"
+    )
+  );
+  app.use(
+    "/api/newsletter",
+    normalizeRouter(
+      require("../routes/newsletter/newsletterRoutes"),
+      "routes/newsletter/newsletterRoutes"
+    )
+  );
 
-  // 💬 Messaging System
-  app.use("/api/messaging", messagingRoutes);
-  app.use("/api/reactions", reactionRoutes);
-  app.use("/api/messages", messageUploadRoutes);
+  // ─────────────────────────────────────────────
+  // 💬 Messaging
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/messaging",
+    normalizeRouter(
+      require("../routes/messaging/messagingRoutes"),
+      "routes/messaging/messagingRoutes"
+    )
+  );
+  app.use(
+    "/api/reactions",
+    normalizeRouter(
+      require("../routes/messaging/reactionRoutes"),
+      "routes/messaging/reactionRoutes"
+    )
+  );
+  app.use(
+    "/api/messages",
+    normalizeRouter(
+      require("../routes/messaging/messageUploadRoutes"),
+      "routes/messaging/messageUploadRoutes"
+    )
+  );
 
-  // 🧾 Misc / Utilities
-  app.use("/api/search", searchRoutes);
-  app.use("/api/notifications", notificationRoutes);
+  // ─────────────────────────────────────────────
+  // 🔎 Search & 🔔 Notifications
+  // ─────────────────────────────────────────────
+  app.use(
+    "/api/search",
+    normalizeRouter(
+      require("../routes/search/searchRoutes"),
+      "routes/search/searchRoutes"
+    )
+  );
+  app.use(
+    "/api/notifications",
+    normalizeRouter(
+      require("../routes/notifications/notificationRoutes"),
+      "routes/notifications/notificationRoutes"
+    )
+  );
 
-  // 📂 Static Assets (e.g. avatars, uploads)
+  // ─────────────────────────────────────────────
+  // 📂 Static Assets
+  // ─────────────────────────────────────────────
   app.use("/uploads", express.static("uploads"));
 };
