@@ -1,15 +1,19 @@
-// File: src/controllers/auth/authController.js
+// File: zone-25-14-backend/src/controllers/auth/authController.js
+// Controller for authentication routes: register, login, logout
+// Usage: const { register, login, logout } = require('../../controllers/auth/authController');
+//        router.post('/register', register);
+//        router.post('/login', login);
+//        router.post('/logout', logout);
+// Note: Ensure to handle errors and edge cases as needed
+
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
 const { createUser, findUserByUsername } = require("../../models/userModel");
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production", // false on localhost HTTP
-  sameSite: "lax",
-  path: "/",
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-};
+const {
+  SESSION_COOKIE_NAME,
+  SESSION_SET_OPTIONS,
+  SESSION_CLEAR_OPTIONS,
+} = require("../../config/cookies");
 
 const register = async (req, res) => {
   try {
@@ -31,10 +35,10 @@ const register = async (req, res) => {
       last_name,
     });
 
-    res.status(201).json({ message: "User created", user });
+    return res.status(201).json({ message: "User created", user });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -43,14 +47,11 @@ const login = async (req, res) => {
     const { username, password } = req.body;
 
     const user = await findUserByUsername(username);
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
+    if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
+    if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
-    }
 
     const payload = {
       user_id: user.user_id,
@@ -59,11 +60,11 @@ const login = async (req, res) => {
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN,
+      expiresIn: process.env.JWT_EXPIRES_IN, // e.g. "7d"
     });
 
-    res
-      .cookie("authToken", token, cookieOptions)
+    return res
+      .cookie(SESSION_COOKIE_NAME, token, SESSION_SET_OPTIONS)
       .status(200)
       .json({
         message: "Login successful",
@@ -83,18 +84,14 @@ const login = async (req, res) => {
       });
   } catch (err) {
     console.error(err.message);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
 const logout = (req, res) => {
-  res.clearCookie("authToken", cookieOptions);
-
-  res.status(200).json({ message: "Logged out successfully" });
+  // ⚠️ clear with options that match how it was set, but WITHOUT maxAge
+  res.clearCookie(SESSION_COOKIE_NAME, SESSION_CLEAR_OPTIONS);
+  return res.status(200).json({ message: "Logged out successfully" });
 };
 
-module.exports = {
-  register,
-  login,
-  logout,
-};
+module.exports = { register, login, logout };
