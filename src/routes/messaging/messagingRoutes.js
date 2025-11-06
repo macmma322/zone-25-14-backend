@@ -126,5 +126,3 @@ router.post("/messages", sendMessage);
 router.get("/messages/:conversationId", getMessages);
 
 module.exports = router;
-
-module.exports = router;

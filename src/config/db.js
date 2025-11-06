@@ -11,4 +11,9 @@ const pool = new Pool({
   ssl: false, // Change to true only if using SSL connection in production (Heroku, AWS, etc)
 });
 
+pool.on("connect", async (client) => {
+  await client.query("SELECT set_config('zone.enc_key', $1, false)", [
+    process.env.ENCRYPTION_SECRET,
+  ]);
+});
 module.exports = pool;

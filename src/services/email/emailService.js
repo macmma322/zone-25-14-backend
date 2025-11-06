@@ -6,8 +6,8 @@
 const { send } = require("./transport");
 
 async function sendEmail(opts) {
-  // ...
   const { providerMessageId, previewUrl } = await send({ ...opts });
-  // ... update outbox, etc.
-  return { providerMessageId, previewUrl }; // <- keep it
+  return { providerMessageId, previewUrl };
 }
+
+module.exports = { sendEmail };

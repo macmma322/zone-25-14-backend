@@ -385,10 +385,13 @@ const sendMessage = async (req, res) => {
             {
               senderName: username,
               eventName: isGroup ? groupName : undefined,
+              isGroup,
+              groupName,
+              media_type,
             }
           ),
           `/chat/${conversationId}`,
-          { isGroup, groupName },
+          { isGroup, groupName, media_type },
           additional_info
         );
       }

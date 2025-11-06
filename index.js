@@ -45,6 +45,9 @@ pool
 
     initSocket(server); // WebSocket live features
 
+    if (process.env.NODE_ENV !== "production") {
+      require("./src/services/email/transport").verifyTransport();
+    }
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
       console.log(`🚀 Server + Socket.IO running on port ${PORT}`);

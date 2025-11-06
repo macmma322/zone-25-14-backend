@@ -336,6 +336,32 @@ const updateUserPreferences = async (req, res) => {
   }
 };
 
+// ✅ PATCH: Update biography
+const updateBiography = async (req, res) => {
+  const userId = req.user.user_id;
+  let { biography } = req.body;
+
+  try {
+    if (typeof biography !== "string") {
+      return res.status(400).json({ message: "Invalid biography." });
+    }
+    biography = biography.trim();
+    if (biography.length > 280) {
+      return res.status(400).json({ message: "Biography exceeds 280 characters." });
+    }
+
+    await pool.query(`UPDATE users SET biography = $1 WHERE user_id = $2`, [
+      biography,
+      userId,
+    ]);
+
+    res.status(200).json({ message: "Biography updated successfully.", biography });
+  } catch (err) {
+    console.error("Update Biography Error:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // ✅ GET user display preferences
 const getDisplayPreferences = async (req, res) => {
   const userId = req.user.user_id;
@@ -382,4 +408,5 @@ module.exports = {
   updateUserPreferences,
   getDisplayPreferences,
   updateDisplayPreferences,
+  updateBiography,
 };

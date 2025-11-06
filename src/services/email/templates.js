@@ -4,15 +4,19 @@
 const BRAND = {
   name: process.env.EMAIL_FROM_NAME || "Zone 25-14",
   baseUrl: process.env.APP_BASE_URL || "http://localhost:3000",
-  accent: "#FF2D00", // CTA button color (salmon/red vibe)
+  accent: "#FF2D00", // CTA button color
 };
 
-/**
- * Base layout with onyx glass look
- * @param {object} p
- * @param {string} p.title
- * @param {string} p.body - inner HTML
- */
+/* ----------------- helpers ----------------- */
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function layout({ title, body }) {
   return `
 <!doctype html>
@@ -33,12 +37,15 @@ function layout({ title, body }) {
     .body { font-size:14px; line-height:1.6; color:#d7d7d7; }
     .cta { display:inline-block; background:${
       BRAND.accent
-    }; color:#000; padding:12px 18px; border-radius:10px; text-decoration:none; 
+    }; color:#000; padding:12px 18px; border-radius:10px; text-decoration:none;
            font-weight:800; text-transform:uppercase; letter-spacing:0.4px; }
     .muted { color:#9b9b9b; font-size:12px; }
     .footer { padding-top:16px; text-align:center; }
     a { color:#9fd2ff; }
     .divider { height:1px; background:rgba(255,255,255,0.08); margin:16px 0; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { font-size:13px; color:#d7d7d7; }
+    th { text-align:left; color:#fff; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08); }
   </style>
 </head>
 <body class="wrap">
@@ -64,6 +71,8 @@ function layout({ title, body }) {
 `;
 }
 
+/* ----------------- templates ----------------- */
+
 /**
  * Password reset email
  * @param {object} p
@@ -88,7 +97,7 @@ function ResetPassword({ username, resetUrl }) {
 }
 
 /**
- * Simple welcome/newsletter confirmation style (optional)
+ * Newsletter / simple welcome
  * @param {object} p
  * @param {string} [p.username]
  * @param {string} [p.manageUrl]
@@ -111,6 +120,71 @@ function NewsletterWelcome({ username, manageUrl }) {
 }
 
 /**
+ * Subscription activated (single or multiple)
+ * @param {object} p
+ * @param {string} [p.username]
+ * @param {Array<{niche_code:string,tier_type:string,valid_until:string|number|Date,price?:number}>} p.items
+ * @param {string} [p.manageUrl]
+ */
+function SubscriptionActivated({ username, items, manageUrl }) {
+  const list = (items || [])
+    .map((it) => {
+      const dateStr = it.valid_until
+        ? new Date(it.valid_until).toLocaleDateString()
+        : "-";
+      const priceStr =
+        typeof it.price === "number" ? `€${Number(it.price).toFixed(2)}` : "-";
+      return `
+        <tr>
+          <td style="padding:8px 0;">${escapeHtml(
+            String(it.niche_code || "-")
+          )}</td>
+          <td style="padding:8px 0;text-transform:capitalize;">${escapeHtml(
+            String(it.tier_type || "-")
+          )}</td>
+          <td style="padding:8px 0;">${escapeHtml(dateStr)}</td>
+          <td style="padding:8px 0;">${priceStr}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return layout({
+    title: "Your subscription is active",
+    body: `
+      <p>Hey ${escapeHtml(username || "member")},</p>
+      <p>Your Zone subscription${
+        (items || []).length > 1 ? "s are" : " is"
+      } live. You now earn <strong>1.5× points</strong> on purchases.</p>
+      <table style="margin:16px 0;">
+        <thead>
+          <tr>
+            <th>Niche</th>
+            <th>Tier</th>
+            <th>Valid until</th>
+            <th>Price</th>
+          </tr>
+        </thead>
+        <tbody>${list}</tbody>
+      </table>
+      <p style="text-align:center;margin:22px 0;">
+        <a class="cta" href="${
+          (process.env.APP_BASE_URL || "http://localhost:3000") +
+          "/account/subscriptions"
+        }">Manage Subscriptions</a>
+      </p>
+      ${
+        manageUrl
+          ? `<p class="muted">Manage: <a href="${manageUrl}">${escapeHtml(
+              manageUrl
+            )}</a></p>`
+          : ""
+      }
+    `,
+  });
+}
+
+/**
  * Generic wrapper (useful for quick transactional messages)
  * @param {object} p
  * @param {string} p.title
@@ -120,18 +194,9 @@ function Generic({ title, html }) {
   return layout({ title, body: html });
 }
 
-/* ----------------- small helper ----------------- */
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 module.exports = {
   ResetPassword,
   NewsletterWelcome,
+  SubscriptionActivated,
   Generic,
 };

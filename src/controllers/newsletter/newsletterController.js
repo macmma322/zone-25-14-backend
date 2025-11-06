@@ -2,9 +2,28 @@
 // Functions: subscribe, dismiss, status, unsubscribe, sgWebhook
 // Dependencies: pg (PostgreSQL client), db configuration, optional email and token services
 // File: src/controllers/newsletter/newsletterController.js
+// File: src/controllers/newsletter/newsletterController.js
+// Controller for newsletter subscription, dismissal, status, unsubscribe, webhook
+
 const pool = require("../../config/db");
-// const { sendConfirmEmail } = require('../services/email'); // optional double opt-in
-// const { signNewsletterToken, verifyNewsletterToken } = require('../services/tokens');
+const { sendEmail } = require("../../services/email/emailService");
+const { NewsletterWelcome } = require("../../services/email/templates");
+
+// Resolve base URLs for links in emails
+const APP_URL = process.env.APP_BASE_URL || "http://localhost:3000"; // frontend
+const API_URL =
+  process.env.API_BASE_URL ||
+  process.env.BACKEND_BASE_URL ||
+  "http://localhost:5000"; // backend (for /unsubscribe)
+
+function buildManageUrl() {
+  return `${APP_URL}/account/newsletter`;
+}
+function buildUnsubUrl(email) {
+  const u = new URL("/api/newsletter/unsubscribe", API_URL);
+  u.searchParams.set("email", email);
+  return u.toString();
+}
 
 exports.subscribe = async (req, res) => {
   try {
@@ -15,6 +34,11 @@ exports.subscribe = async (req, res) => {
     }
 
     const userId = req.user?.userId ?? null;
+    // If logged in, try a friendly name; otherwise fall back to the mailbox part
+    const username =
+      req.user?.username ||
+      (email.includes("@") ? email.split("@")[0] : "Member");
+
     const source = "site-modal";
     const now = new Date().toISOString();
 
@@ -38,6 +62,7 @@ exports.subscribe = async (req, res) => {
       [email, userId, source, now]
     );
 
+    // For logged users: flip flags in profile (DND here means “don’t nag with modal”)
     if (userId) {
       await pool.query(
         `
@@ -50,6 +75,36 @@ exports.subscribe = async (req, res) => {
         [userId, now]
       );
     }
+
+    // Fire-and-forget welcome email (doesn't block response)
+    (async () => {
+      try {
+        const manageUrl = buildManageUrl();
+        const unsubUrl = buildUnsubUrl(email);
+        const html = NewsletterWelcome({
+          username,
+          manageUrl,
+        }).replace(
+          '</div>\n    <div class="footer muted">',
+          // Add a small unsubscribe line before footer (keeps your template generic)
+          `<p class="muted" style="margin-top:14px">To unsubscribe, click <a href="${unsubUrl}">here</a>.</p>\n    </div>\n    <div class="footer muted">`
+        );
+
+        await sendEmail({
+          to: email,
+          subject: "Welcome to the Zone newsletter",
+          html,
+          text: `Welcome ${username}! You’re in. Manage preferences at ${manageUrl}. To unsubscribe: ${unsubUrl}`,
+          category: "newsletter_welcome",
+          meta: { source, userId },
+        });
+      } catch (mailErr) {
+        console.error(
+          "[newsletter.subscribe] email send failed:",
+          mailErr.message
+        );
+      }
+    })();
 
     return res.json({ ok: true });
   } catch (err) {
@@ -75,7 +130,6 @@ exports.dismiss = async (req, res) => {
 
 exports.status = async (req, res) => {
   try {
-    // If logged in, trust user flags
     if (req.user?.userId) {
       const q = await pool.query(
         `SELECT newsletter_opt_in, newsletter_dnd FROM users WHERE user_id = $1`,
@@ -87,12 +141,11 @@ exports.status = async (req, res) => {
         dnd: !!row?.newsletter_dnd,
       });
     }
-    // For guests, you could accept an email and check subscribers:
     const { email } = req.body || {};
     if (email) {
       const q = await pool.query(
         `SELECT status FROM newsletter_subscribers WHERE email = $1`,
-        [email]
+        [email.toLowerCase()]
       );
       const subscribed = q.rows[0]?.status === "confirmed";
       return res.json({ subscribed, dnd: false });
@@ -107,7 +160,7 @@ exports.status = async (req, res) => {
 exports.unsubscribe = async (req, res) => {
   try {
     const { token, email } = req.query;
-    // if using tokens:
+    // If you later use signed tokens for unsub:
     // const payload = verifyNewsletterToken(token);
     // const email = payload.email;
 
@@ -120,20 +173,15 @@ exports.unsubscribe = async (req, res) => {
       SET status='unsubscribed', unsubscribed_at=$2, last_event_at=$2
       WHERE email=$1
     `,
-      [email, now]
+      [String(email).toLowerCase(), now]
     );
 
-    // Also flip user profile if exists
     await pool.query(
-      `
-      UPDATE users
-      SET newsletter_opt_in=false
-      WHERE email=$1
-    `,
-      [email]
+      `UPDATE users SET newsletter_opt_in=false WHERE email=$1`,
+      [String(email).toLowerCase()]
     );
 
-    // Redirect to a friendly page
+    // Send them to a friendly page on the app
     return res.redirect("/newsletter/unsubscribed");
   } catch (err) {
     console.error("newsletter.unsubscribe", err);
@@ -141,11 +189,9 @@ exports.unsubscribe = async (req, res) => {
   }
 };
 
-// Example ESP webhook handler (sketch)
-exports.sgWebhook = async (req, res) => {
+exports.sgWebhook = async (_req, res) => {
   try {
-    // parse events and update status accordingly
-    // e.g., 'bounce' -> status='bounced', 'spamreport' -> 'complained'
+    // TODO: parse ESP events and update newsletter_subscribers status (‘bounced’, ‘complained’, etc.)
     return res.json({ ok: true });
   } catch (err) {
     console.error("newsletter.sgWebhook", err);

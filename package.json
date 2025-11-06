@@ -37,7 +37,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^6.10.0",
+    "nodemailer": "^7.0.9",
     "pg": "^8.14.1",
     "pg-pool": "^3.8.0",
     "redis": "^5.5.6",

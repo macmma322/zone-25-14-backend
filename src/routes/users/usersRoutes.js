@@ -21,6 +21,9 @@ router.patch(
 );
 router.patch("/profile/birthday", protectRoute, userController.setBirthday);
 
+// ✍️ Biography
+router.patch("/bio", protectRoute, userController.updateBiography);
+
 // 🌐 Preferences
 router.get("/preferences", protectRoute, userController.getUserPreferences);
 router.patch(
