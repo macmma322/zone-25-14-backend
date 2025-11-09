@@ -816,6 +816,141 @@ const deleteConversation = async (req, res) => {
   res.json({ ok: true });
 };
 
+// --- helpers ---
+async function getMessageMeta(messageId) {
+  const { rows } = await pool.query(
+    `SELECT message_id, conversation_id, sender_id, sent_at, is_deleted
+       FROM messages
+      WHERE message_id = $1`,
+    [messageId]
+  );
+  return rows[0] || null;
+}
+
+async function isMessageSeenByOthers(conversationId, senderId, sentAt) {
+  // Any other member whose last_read_at >= sentAt counts as seen
+  const { rows } = await pool.query(
+    `SELECT 1
+       FROM conversation_members
+      WHERE conversation_id = $1
+        AND user_id <> $2
+        AND last_read_at IS NOT NULL
+        AND last_read_at >= $3
+      LIMIT 1`,
+    [conversationId, senderId, sentAt]
+  );
+  return rows.length > 0;
+}
+
+/** PATCH /messages/:id  -> edit content (text only) */
+const updateMessage = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.user_id;
+  const { content } = req.body || {};
+
+  try {
+    const meta = await getMessageMeta(id);
+    if (!meta) return res.status(404).json({ error: "Message not found" });
+    if (meta.sender_id !== userId)
+      return res.status(403).json({ error: "Not your message" });
+    if (meta.is_deleted)
+      return res.status(400).json({ error: "Message deleted" });
+
+    const clean =
+      typeof content === "string" && content.trim() ? content.trim() : null;
+    if (!clean) return res.status(400).json({ error: "Content required" });
+
+    // If you don't have edited_at column yet, see migration below.
+    const { rows } = await pool.query(
+      `UPDATE messages
+          SET content = $1,
+              edited_at = NOW()
+        WHERE message_id = $2
+        RETURNING message_id, conversation_id, content, edited_at`,
+      [clean, id]
+    );
+
+    const updated = rows[0];
+    const io = getIO();
+    io.to(updated.conversation_id).emit("messageEdited", {
+      message_id: updated.message_id,
+      content: updated.content,
+      edited_at: updated.edited_at,
+    });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error("updateMessage error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+/** DELETE /messages/:id  -> soft delete (keeps row, hides content/media) */
+const softDelete = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.user_id;
+
+  try {
+    const meta = await getMessageMeta(id);
+    if (!meta) return res.status(404).json({ error: "Message not found" });
+    if (meta.sender_id !== userId)
+      return res.status(403).json({ error: "Not your message" });
+    if (meta.is_deleted) return res.json({ ok: true, softDeleted: true });
+
+    await pool.query(
+      `UPDATE messages
+          SET is_deleted = TRUE,
+              content = NULL,
+              media_url = NULL,
+              media_type = NULL
+        WHERE message_id = $1`,
+      [id]
+    );
+
+    const io = getIO();
+    io.to(meta.conversation_id).emit("messageSoftDeleted", { message_id: id });
+
+    return res.json({ ok: true, softDeleted: true });
+  } catch (e) {
+    console.error("softDelete error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+/** DELETE /messages/:id/hard  -> hard delete ONLY if unseen by others */
+const hardDelete = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.user_id;
+
+  try {
+    const meta = await getMessageMeta(id);
+    if (!meta) return res.status(404).json({ error: "Message not found" });
+    if (meta.sender_id !== userId)
+      return res.status(403).json({ error: "Not your message" });
+
+    const seen = await isMessageSeenByOthers(
+      meta.conversation_id,
+      meta.sender_id,
+      meta.sent_at
+    );
+    if (seen) {
+      return res
+        .status(409)
+        .json({ error: "Already seen — hard delete not allowed" });
+    }
+
+    await pool.query(`DELETE FROM messages WHERE message_id = $1`, [id]);
+
+    const io = getIO();
+    io.to(meta.conversation_id).emit("messageHardDeleted", { message_id: id });
+
+    return res.json({ ok: true, hardDeleted: true });
+  } catch (e) {
+    console.error("hardDelete error", e);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
 module.exports = {
   createConversation,
   addMember,
@@ -834,4 +969,7 @@ module.exports = {
   muteConversation,
   pinConversation,
   deleteConversation,
+  updateMessage,
+  softDelete,
+  hardDelete,
 };

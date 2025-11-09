@@ -1,11 +1,13 @@
 // File: src/routes/points/pointsRoutes.js
-const express = require('express');
-const { manualAddPoints } = require('../../controllers/points/pointsController');
-const { adminProtect } = require('../../middleware/adminMiddleware');
+const express = require("express");
+const {
+  manualAddPoints,
+} = require("../../controllers/points/pointsController");
+const { adminProtect } = require("../../middleware/adminMiddleware");
 
 const router = express.Router();
 
 // Admin-only manual points adding
-router.post('/manual-add', adminProtect, manualAddPoints);
+router.post("/manual-add", adminProtect, manualAddPoints);
 
 module.exports = router;

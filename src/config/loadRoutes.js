@@ -131,7 +131,7 @@ module.exports = function loadRoutes(app) {
     "/api/points",
     normalizeRouter(
       require("../routes/points/pointsRoutes"),
-      "routes/points/pointsRoutes"
+      "../routes/points/pointsRoutes"
     )
   );
 

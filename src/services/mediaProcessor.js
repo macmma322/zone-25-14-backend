@@ -158,6 +158,52 @@ const transcodeVideo = async (originalFilePath, targetDir) => {
   });
 };
 
+async function run(cmd) {
+  return new Promise((resolve, reject) => {
+    exec(cmd, (err, stdout, stderr) =>
+      err ? reject(err) : resolve({ stdout, stderr })
+    );
+  });
+}
+
+/**
+ * Transcode arbitrary audio (webm/m4a/mp3) to MP3 128k, return file path + durationMs.
+ * Keeps file small and compatible across browsers and mobile.
+ */
+async function transcodeAudio(originalFilePath, targetDir) {
+  const ext = path.extname(originalFilePath);
+  const base = path.basename(originalFilePath, ext);
+  const stamp = Date.now();
+  const safe = base.replace(/[^\w.-]+/g, "_");
+
+  const outFile = path.join(targetDir, `${safe}-${stamp}.mp3`);
+  const probeJson = path.join(targetDir, `${safe}-${stamp}.json`);
+
+  try {
+    // Loudness normalization is optional; keeping it simple and fast:
+    // -vn: no video, -ac 2: stereo, -ar 48k: sample rate, -b:a 128k: bitrate
+    await run(
+      `ffmpeg -y -i "${originalFilePath}" -vn -ac 2 -ar 48000 -b:a 128k "${outFile}"`
+    );
+
+    // Probe duration
+    await run(
+      `ffprobe -v quiet -print_format json -show_format "${outFile}" > "${probeJson}"`
+    );
+    const meta = JSON.parse(await fs.readFile(probeJson, "utf8"));
+    const durSec = Number(meta?.format?.duration || 0);
+
+    // Cleanup temp
+    await fs.unlink(probeJson).catch(() => {});
+    await fs.unlink(originalFilePath).catch(() => {}); // remove original temp
+
+    return { audio: outFile, durationMs: Math.round(durSec * 1000) };
+  } catch (err) {
+    // Fallback: keep original if transcode fails
+    return { audio: originalFilePath, durationMs: null };
+  }
+}
+
 const scanWithClamAV = async (filePath) => {
   console.log(`[ClamAV Scanner] 🔍 Scanning file placeholder: ${filePath}`);
   // TODO: hook into ClamAV for virus scanning (e.g., using a library or executing external tool)
@@ -169,4 +215,5 @@ module.exports = {
   compressImage,
   transcodeVideo,
   scanWithClamAV,
+  transcodeAudio,
 };

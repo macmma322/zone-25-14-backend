@@ -33,6 +33,9 @@ const {
   muteConversation, // NEW (per user)
   pinConversation, // NEW (per user)
   deleteConversation, // NEW (owner only)
+  updateMessage,
+  softDelete,
+  hardDelete,
 } = require("../../controllers/messaging/messagingController");
 
 // All routes protected
@@ -124,5 +127,9 @@ router.post(
 
 router.post("/messages", sendMessage);
 router.get("/messages/:conversationId", getMessages);
+// Messages (create/list exist already)
+router.patch("/messages/:id", updateMessage); // edit
+router.delete("/messages/:id", softDelete); // soft delete
+router.delete("/messages/:id/hard", hardDelete); // hard delete if unseen
 
 module.exports = router;

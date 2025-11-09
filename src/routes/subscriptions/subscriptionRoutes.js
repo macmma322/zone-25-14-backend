@@ -5,35 +5,25 @@
 
 const express = require("express");
 const router = express.Router();
-const subscriptionController = require("../../controllers/subscriptions/subscriptionController");
 const { protectRoute } = require("../../middleware/authMiddleware");
 
 // Subscribe to one or more niches (also sends SubscriptionActivated email for new ones)
-router.post(
-  "/subscriptions",
-  protectRoute,
-  subscriptionController.subscribeToNiches
-);
+const {
+  getUserSubscriptions,
+  subscribeToNiches,
+  removeSubscription,
+  removeSubscriptionWithPolicy,
+  testSubscriptionEmail,
+} = require("../../controllers/subscriptions/subscriptionController.js");
 
-// Get user's active subscriptions
-router.get(
-  "/subscriptions",
-  protectRoute,
-  subscriptionController.getUserSubscriptions
-);
-
-// Cancel subscription
+router.get("/my", protectRoute, getUserSubscriptions);
+router.post("/subscribe", protectRoute, subscribeToNiches);
+router.delete("/cancel/:subscriptionId", protectRoute, removeSubscription);
 router.delete(
-  "/subscriptions/:subscriptionId",
+  "/cancel-policy/:subscriptionId",
   protectRoute,
-  subscriptionController.removeSubscription
+  removeSubscriptionWithPolicy
 );
-
-// (Optional) Dev-only: send a test “subscription activated” email (no DB writes)
-router.post(
-  "/test-email",
-  protectRoute,
-  subscriptionController.testSubscriptionEmail
-);
+router.post("/test-email", protectRoute, testSubscriptionEmail);
 
 module.exports = router;

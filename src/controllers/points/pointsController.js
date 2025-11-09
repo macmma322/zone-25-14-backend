@@ -3,43 +3,49 @@
 // such as manually adding points to a user.
 // It interacts with the loyalty service to update user points and roles.
 
+// src/controllers/points/pointsController.js
 const {
   updateUserPointsAndRole,
+  getPointsMultiplier,
+  insertPointsLedger,
 } = require("../../services/loyalty/loyaltyService");
 
-// Temporary endpoint to manually give points to user
 const manualAddPoints = async (req, res) => {
-  const { userId, earnedPoints } = req.body;
+  const { userId, earnedPoints, applyMultiplier } = req.body;
 
   try {
-    // Validation: Ensure that userId and earnedPoints are present
-    if (
-      !userId ||
-      !earnedPoints ||
-      typeof earnedPoints !== "number" ||
-      earnedPoints <= 0
-    ) {
+    if (!userId || typeof earnedPoints !== "number" || earnedPoints <= 0) {
       return res
         .status(400)
         .json({ message: "User ID and valid earnedPoints are required." });
     }
 
-    // Update points and possibly promote role
-    await updateUserPointsAndRole(userId, earnedPoints);
+    let toApply = earnedPoints;
+    if (applyMultiplier) {
+      const mult = await getPointsMultiplier(userId); // 1 or 1.5
+      toApply = Math.floor(earnedPoints * mult); // or keep decimals if you want
+    }
+
+    // write to ledger first (optional but recommended)
+    await insertPointsLedger(userId, toApply, {
+      reason: "manual_add",
+      applyMultiplier: !!applyMultiplier,
+    });
+
+    // update running total + auto-promote
+    const newTotal = await updateUserPointsAndRole(userId, toApply);
 
     res.status(200).json({
-      message: `Successfully added ${earnedPoints} points to user ${userId}`,
+      message: `Added ${toApply} points to user ${userId}${
+        applyMultiplier ? " (multiplier applied)" : ""
+      }.`,
+      newTotalPoints: newTotal,
       success: true,
     });
   } catch (err) {
-    console.error("Manual Points Error:", err.message);
-    res.status(500).json({
-      message: "Server error",
-      success: false,
-    });
+    console.error("Manual Points Error:", err);
+    res.status(500).json({ message: "Server error", success: false });
   }
 };
 
-module.exports = {
-  manualAddPoints,
-};
+module.exports = { manualAddPoints };

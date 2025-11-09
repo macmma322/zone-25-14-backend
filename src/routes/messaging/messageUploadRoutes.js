@@ -5,6 +5,7 @@ const { uploadMedia } = require("../../middleware/uploadMiddleware");
 const {
   compressImage,
   transcodeVideo,
+  transcodeAudio,
   scanWithClamAV,
 } = require("../../services/mediaProcessor");
 const { protectRoute } = require("../../middleware/authMiddleware");
@@ -47,7 +48,11 @@ router.post(
 
       let finalStoredPath; // This will be the path to the final stored file (webp, mp4, or moved gif)
       let finalThumbnailPath = null;
-      const mediaType = mime.startsWith("video") ? "video" : "image";
+      const mediaType = mime.startsWith("video")
+        ? "video"
+        : mime.startsWith("audio")
+        ? "audio"
+        : "image";
 
       if (mediaType === "image") {
         if (mime !== "image/gif") {
@@ -58,7 +63,7 @@ router.post(
             originalMulterTempPath,
             userMediaTargetDir
           );
-        } else {
+        } else if (mediaType === "video") {
           // For GIF, just move it to the final user directory with a new name
           const originalExt = path.extname(originalMulterTempPath);
           const newFileName = `${path.basename(
@@ -68,6 +73,13 @@ router.post(
           finalStoredPath = path.join(userMediaTargetDir, newFileName);
           await fsPromises.rename(originalMulterTempPath, finalStoredPath);
           console.log("🟡 GIF moved to:", finalStoredPath);
+        } else if (mediaType === "audio") {
+          const { audio, durationMs } = await transcodeAudio(
+            originalMulterTempPath,
+            userMediaTargetDir
+          );
+          finalStoredPath = audio;
+          req._voiceDurationMs = durationMs || null;
         }
       } else {
         // transcodeVideo will move and process the file.

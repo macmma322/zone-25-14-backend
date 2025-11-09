@@ -14,6 +14,10 @@ const loadRoutes = require("./src/config/loadRoutes");
 const app = express();
 const server = http.createServer(app);
 
+app.use(require("cookie-parser")());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 //////////////////////////////////////////////////
 // ▪️ Load All Middlewares
 //////////////////////////////////////////////////
@@ -37,6 +41,7 @@ app.set("trust proxy", ["loopback", "linklocal", "uniquelocal"]);
 //////////////////////////////////////////////////
 // ▪️ Database + Socket.IO + Server Init
 //////////////////////////////////////////////////
+
 pool
   .connect()
   .then((client) => {
