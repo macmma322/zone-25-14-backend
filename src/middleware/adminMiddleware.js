@@ -1,336 +1,317 @@
 // src/middleware/adminMiddleware.js
-// Enhanced admin middleware with granular role-based access control
 const jwt = require("jsonwebtoken");
 const pool = require("../config/db");
 
-/* ==================== ROLE DEFINITIONS ==================== */
+/* ==================== ROLE DEFINITIONS (match DB exactly) ==================== */
 
 const ROLES = {
-  FOUNDER: "Founder", // Highest level - full access
-  HYPE_LEAD: "Hype Lead", // Senior admin
-  STORE_CHIEF: "Store Chief", // Product/store management
-  MODERATOR: "Moderator", // Community moderation
-  VIP: "VIP", // Premium user
-  REGULAR: "Explorer", // Default user
+  FOUNDER: "Founder",
+  HYPE_LEAD: "Hype Lead",
+  STORE_CHIEF: "Store Chief",
+  MODERATOR: "Moderator",
+  ULTIMATE: "Ultimate",
+  LEGEND: "Legend",
+  ELITE: "Elite Member",
+  SUPPORTER: "Supporter",
+  EXPLORER: "Explorer",
 };
 
-const ADMIN_ROLES = [ROLES.FOUNDER, ROLES.HYPE_LEAD, ROLES.STORE_CHIEF];
+// Groups
+const ADMIN_ROLES = new Set([
+  ROLES.FOUNDER,
+  ROLES.HYPE_LEAD,
+  ROLES.STORE_CHIEF,
+]);
+const SUPER_ADMIN_ROLES = new Set([ROLES.FOUNDER]);
+const MODERATOR_ROLES = new Set([
+  ROLES.FOUNDER,
+  ROLES.HYPE_LEAD,
+  ROLES.MODERATOR,
+]);
 
-const SUPER_ADMIN_ROLES = [ROLES.FOUNDER];
+/* ==================== HELPERS ==================== */
 
-const MODERATOR_ROLES = [ROLES.FOUNDER, ROLES.HYPE_LEAD, ROLES.MODERATOR];
+const getToken = (req) => {
+  if (req.cookies?.authToken) return req.cookies.authToken;
+  const h = req.headers.authorization || "";
+  if (h.toLowerCase().startsWith("bearer ")) return h.slice(7).trim();
+  return null;
+};
 
-/* ==================== HELPER FUNCTIONS ==================== */
+function parsePermissions(jsonb) {
+  if (!jsonb) return {};
+  if (typeof jsonb === "object") return jsonb;
+  try {
+    return JSON.parse(jsonb);
+  } catch {
+    return {};
+  }
+}
 
 /**
- * Get user role from database
+ * Fetch role info from DB (no slug needed).
+ * Returns: { role_name, is_staff, permissions }
  */
 async function getUserRole(userId) {
-  try {
-    const query = `
-      SELECT rl.role_name, rl.is_staff
-      FROM users u
-      JOIN user_roles_levels rl ON u.role_level_id = rl.role_level_id
-      WHERE u.user_id = $1
-    `;
-    const { rows } = await pool.query(query, [userId]);
-    return rows[0] || null;
-  } catch (error) {
-    console.error("Error fetching user role:", error.message);
-    return null;
-  }
+  const { rows } = await pool.query(
+    `
+    SELECT rl.role_name, rl.is_staff, rl.permissions
+    FROM public.users u
+    JOIN public.user_roles_levels rl ON u.role_level_id = rl.role_level_id
+    WHERE u.user_id = $1
+    `,
+    [userId]
+  );
+  if (!rows[0]) return null;
+  return {
+    role_name: rows[0].role_name,
+    is_staff: !!rows[0].is_staff,
+    permissions: parsePermissions(rows[0].permissions),
+  };
 }
 
-/**
- * Check if user has any of the specified roles
- */
-function hasAnyRole(userRole, allowedRoles) {
-  return allowedRoles.includes(userRole);
-}
+/* ==================== CORE CHECKERS (role_name + is_staff only) ==================== */
 
-/**
- * Check if user is staff
- */
-function isStaff(roleData) {
-  return roleData?.is_staff === true;
-}
+const allowIfAdmin = (role) => role.is_staff || ADMIN_ROLES.has(role.role_name);
 
-/* ==================== MIDDLEWARE FUNCTIONS ==================== */
+const allowIfSuperAdmin = (role) => SUPER_ADMIN_ROLES.has(role.role_name);
 
-/**
- * General admin protection
- * Allows: Store Chief, Hype Lead, Founder
- */
+const allowIfModerator = (role) =>
+  role.is_staff || MODERATOR_ROLES.has(role.role_name);
+
+/* ==================== MIDDLEWARE ==================== */
+
 const adminProtect = async (req, res, next) => {
-  const token = req.cookies.authToken;
-
-  if (!token) {
-    return res.status(401).json({
-      message: "Authentication required",
-      required_role: "admin",
-    });
-  }
-
   try {
+    const token = getToken(req);
+    if (!token)
+      return res
+        .status(401)
+        .json({ message: "Authentication required", required_role: "admin" });
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = { userId: decoded.userId || decoded.user_id };
 
-    const roleData = await getUserRole(req.user.userId);
+    const role = await getUserRole(req.user.userId);
+    if (!role)
+      return res
+        .status(403)
+        .json({ message: "Access denied: User role not found" });
 
-    if (!roleData) {
-      return res.status(403).json({
-        message: "Access denied: User role not found",
-      });
-    }
-
-    if (hasAnyRole(roleData.role_name, ADMIN_ROLES)) {
-      req.user.role = roleData.role_name;
-      req.user.isStaff = roleData.is_staff;
+    if (allowIfAdmin(role)) {
+      req.user.role = role.role_name;
+      req.user.isStaff = role.is_staff;
+      req.user.permissions = role.permissions;
       return next();
     }
-
     return res.status(403).json({
       message: "Access denied: Admin privileges required",
-      your_role: roleData.role_name,
-      required_roles: ADMIN_ROLES,
+      your_role: role.role_name,
+      required_roles: Array.from(ADMIN_ROLES),
     });
-  } catch (error) {
-    console.error("Admin Auth Error:", error.message);
-    return res.status(401).json({
-      message: "Invalid or expired token",
-    });
+  } catch (err) {
+    console.error("[adminProtect]", err.message);
+    return res.status(401).json({ message: "Invalid or expired token" });
   }
 };
 
-/**
- * Super admin protection
- * Allows: Founder only
- */
 const superAdminProtect = async (req, res, next) => {
-  const token = req.cookies.authToken;
-
-  if (!token) {
-    return res.status(401).json({
-      message: "Authentication required",
-      required_role: "super_admin",
-    });
-  }
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { userId: decoded.userId || decoded.user_id };
-
-    const roleData = await getUserRole(req.user.userId);
-
-    if (!roleData) {
-      return res.status(403).json({
-        message: "Access denied: User role not found",
-      });
-    }
-
-    if (hasAnyRole(roleData.role_name, SUPER_ADMIN_ROLES)) {
-      req.user.role = roleData.role_name;
-      req.user.isStaff = roleData.is_staff;
-      return next();
-    }
-
-    return res.status(403).json({
-      message: "Access denied: Super admin privileges required",
-      your_role: roleData.role_name,
-      required_roles: SUPER_ADMIN_ROLES,
-    });
-  } catch (error) {
-    console.error("Super Admin Auth Error:", error.message);
-    return res.status(401).json({
-      message: "Invalid or expired token",
-    });
-  }
-};
-
-/**
- * Moderator protection
- * Allows: Moderator, Hype Lead, Founder
- */
-const moderatorProtect = async (req, res, next) => {
-  const token = req.cookies.authToken;
-
-  if (!token) {
-    return res.status(401).json({
-      message: "Authentication required",
-      required_role: "moderator",
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { userId: decoded.userId || decoded.user_id };
-
-    const roleData = await getUserRole(req.user.userId);
-
-    if (!roleData) {
-      return res.status(403).json({
-        message: "Access denied: User role not found",
-      });
-    }
-
-    if (hasAnyRole(roleData.role_name, MODERATOR_ROLES)) {
-      req.user.role = roleData.role_name;
-      req.user.isStaff = roleData.is_staff;
-      return next();
-    }
-
-    return res.status(403).json({
-      message: "Access denied: Moderator privileges required",
-      your_role: roleData.role_name,
-      required_roles: MODERATOR_ROLES,
-    });
-  } catch (error) {
-    console.error("Moderator Auth Error:", error.message);
-    return res.status(401).json({
-      message: "Invalid or expired token",
-    });
-  }
-};
-
-/**
- * Staff protection (any staff member)
- * Allows: Any user with is_staff = true
- */
-const staffProtect = async (req, res, next) => {
-  const token = req.cookies.authToken;
-
-  if (!token) {
-    return res.status(401).json({
-      message: "Authentication required",
-      required_role: "staff",
-    });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { userId: decoded.userId || decoded.user_id };
-
-    const roleData = await getUserRole(req.user.userId);
-
-    if (!roleData) {
-      return res.status(403).json({
-        message: "Access denied: User role not found",
-      });
-    }
-
-    if (isStaff(roleData)) {
-      req.user.role = roleData.role_name;
-      req.user.isStaff = roleData.is_staff;
-      return next();
-    }
-
-    return res.status(403).json({
-      message: "Access denied: Staff privileges required",
-      your_role: roleData.role_name,
-    });
-  } catch (error) {
-    console.error("Staff Auth Error:", error.message);
-    return res.status(401).json({
-      message: "Invalid or expired token",
-    });
-  }
-};
-
-/**
- * Custom role checker - allows specific roles
- * Usage: requireAnyRole([ROLES.FOUNDER, ROLES.HYPE_LEAD])
- */
-const requireAnyRole = (allowedRoles) => {
-  return async (req, res, next) => {
-    const token = req.cookies.authToken;
-
-    if (!token) {
+    const token = getToken(req);
+    if (!token)
       return res.status(401).json({
         message: "Authentication required",
+        required_role: "super_admin",
       });
-    }
 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { userId: decoded.userId || decoded.user_id };
+
+    const role = await getUserRole(req.user.userId);
+    if (!role)
+      return res
+        .status(403)
+        .json({ message: "Access denied: User role not found" });
+
+    if (allowIfSuperAdmin(role)) {
+      req.user.role = role.role_name;
+      req.user.isStaff = role.is_staff;
+      req.user.permissions = role.permissions;
+      return next();
+    }
+    return res.status(403).json({
+      message: "Access denied: Super admin privileges required",
+      your_role: role.role_name,
+      required_roles: Array.from(SUPER_ADMIN_ROLES),
+    });
+  } catch (err) {
+    console.error("[superAdminProtect]", err.message);
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+};
+
+const moderatorProtect = async (req, res, next) => {
+  try {
+    const token = getToken(req);
+    if (!token)
+      return res.status(401).json({
+        message: "Authentication required",
+        required_role: "moderator",
+      });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { userId: decoded.userId || decoded.user_id };
+
+    const role = await getUserRole(req.user.userId);
+    if (!role)
+      return res
+        .status(403)
+        .json({ message: "Access denied: User role not found" });
+
+    if (allowIfModerator(role)) {
+      req.user.role = role.role_name;
+      req.user.isStaff = role.is_staff;
+      req.user.permissions = role.permissions;
+      return next();
+    }
+    return res.status(403).json({
+      message: "Access denied: Moderator privileges required",
+      your_role: role.role_name,
+      required_roles: ["Moderator", "Hype Lead", "Founder"],
+    });
+  } catch (err) {
+    console.error("[moderatorProtect]", err.message);
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+};
+
+const staffProtect = async (req, res, next) => {
+  try {
+    const token = getToken(req);
+    if (!token)
+      return res
+        .status(401)
+        .json({ message: "Authentication required", required_role: "staff" });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = { userId: decoded.userId || decoded.user_id };
+
+    const role = await getUserRole(req.user.userId);
+    if (!role)
+      return res
+        .status(403)
+        .json({ message: "Access denied: User role not found" });
+
+    if (role.is_staff) {
+      req.user.role = role.role_name;
+      req.user.isStaff = role.is_staff;
+      req.user.permissions = role.permissions;
+      return next();
+    }
+    return res.status(403).json({
+      message: "Access denied: Staff privileges required",
+      your_role: role.role_name,
+    });
+  } catch (err) {
+    console.error("[staffProtect]", err.message);
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
+};
+
+/**
+ * Permission-based guard (reads permissions JSONB on the role).
+ * Usage: router.post("/points/manual-add", adminProtect, requirePermission("manage_points"), handler);
+ */
+const requirePermission = (permKey) => (req, res, next) => {
+  // admins (is_staff/ADMIN) are allowed regardless of the key
+  if (req.user?.isStaff || ADMIN_ROLES.has(req.user?.role)) return next();
+  if (req.user?.permissions?.[permKey] === true) return next();
+  return res.status(403).json({ message: `Missing permission: ${permKey}` });
+};
+
+/**
+ * Generic: allow any of the provided role names (display names)
+ */
+const requireAnyRole = (allowedRoleNames = []) => {
+  const allowed = new Set(allowedRoleNames);
+  return async (req, res, next) => {
     try {
+      const token = getToken(req);
+      if (!token)
+        return res.status(401).json({ message: "Authentication required" });
+
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = { userId: decoded.userId || decoded.user_id };
 
-      const roleData = await getUserRole(req.user.userId);
+      const role = await getUserRole(req.user.userId);
+      if (!role)
+        return res
+          .status(403)
+          .json({ message: "Access denied: User role not found" });
 
-      if (!roleData) {
-        return res.status(403).json({
-          message: "Access denied: User role not found",
-        });
-      }
-
-      if (hasAnyRole(roleData.role_name, allowedRoles)) {
-        req.user.role = roleData.role_name;
-        req.user.isStaff = roleData.is_staff;
+      if (allowed.has(role.role_name)) {
+        req.user.role = role.role_name;
+        req.user.isStaff = role.is_staff;
+        req.user.permissions = role.permissions;
         return next();
       }
-
       return res.status(403).json({
         message: "Access denied: Insufficient privileges",
-        your_role: roleData.role_name,
-        required_roles: allowedRoles,
+        your_role: role.role_name,
       });
-    } catch (error) {
-      console.error("Role Auth Error:", error.message);
-      return res.status(401).json({
-        message: "Invalid or expired token",
-      });
+    } catch (err) {
+      console.error("[requireAnyRole]", err.message);
+      return res.status(401).json({ message: "Invalid or expired token" });
     }
   };
 };
 
 /**
- * Check role middleware - attaches role info but doesn't block
- * Useful for optional permissions
+ * Non-blocking: attach role info if available
  */
 const checkRole = async (req, res, next) => {
-  const token = req.cookies.authToken;
-
-  if (!token) {
-    req.user = { ...req.user, role: null, isStaff: false };
-    return next();
-  }
-
   try {
+    const token = getToken(req);
+    if (!token) {
+      req.user = { ...req.user, role: null, isStaff: false, permissions: {} };
+      return next();
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = { userId: decoded.userId || decoded.user_id };
 
-    const roleData = await getUserRole(req.user.userId);
-
-    if (roleData) {
-      req.user.role = roleData.role_name;
-      req.user.isStaff = roleData.is_staff;
+    const role = await getUserRole(req.user.userId);
+    if (role) {
+      req.user.role = role.role_name;
+      req.user.isStaff = role.is_staff;
+      req.user.permissions = role.permissions;
+    } else {
+      req.user = { ...req.user, role: null, isStaff: false, permissions: {} };
     }
-
     next();
-  } catch (error) {
-    req.user = { ...req.user, role: null, isStaff: false };
+  } catch {
+    req.user = { ...req.user, role: null, isStaff: false, permissions: {} };
     next();
   }
 };
 
 /* ==================== EXPORTS ==================== */
-
 module.exports = {
   // Middleware
   adminProtect,
   superAdminProtect,
   moderatorProtect,
   staffProtect,
+  requirePermission, // ← new, for fine-grained checks
   requireAnyRole,
   checkRole,
 
-  // Constants (for use in controllers/routes)
+  // Constants
   ROLES,
-  ADMIN_ROLES,
-  SUPER_ADMIN_ROLES,
-  MODERATOR_ROLES,
+  ADMIN_ROLES: Array.from(ADMIN_ROLES),
+  SUPER_ADMIN_ROLES: Array.from(SUPER_ADMIN_ROLES),
+  MODERATOR_ROLES: Array.from(MODERATOR_ROLES),
 
-  // Helpers (for use in controllers)
+  // Helpers
   getUserRole,
-  hasAnyRole,
-  isStaff,
 };

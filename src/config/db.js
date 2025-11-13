@@ -48,12 +48,6 @@ const pool = new Pool(buildConfig());
 // Minimal safe connection log (never log password)
 pool.on("connect", (client) => {
   const cp = client.connectionParameters || {};
-  console.log("[DB] connected", {
-    host: cp.host,
-    db: cp.database,
-    user: cp.user,
-    ssl: !!cp.ssl,
-  });
 });
 
 // Set encryption key per physical connection

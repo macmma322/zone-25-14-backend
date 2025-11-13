@@ -14,6 +14,7 @@ const getProfileOverview = async (req, res) => {
     const userRes = await pool.query(
       `
       SELECT 
+      u.user_id,
         u.points, 
         u.username,
         pgp_sym_decrypt(u.email, $2) AS email,
@@ -347,7 +348,9 @@ const updateBiography = async (req, res) => {
     }
     biography = biography.trim();
     if (biography.length > 280) {
-      return res.status(400).json({ message: "Biography exceeds 280 characters." });
+      return res
+        .status(400)
+        .json({ message: "Biography exceeds 280 characters." });
     }
 
     await pool.query(`UPDATE users SET biography = $1 WHERE user_id = $2`, [
@@ -355,7 +358,9 @@ const updateBiography = async (req, res) => {
       userId,
     ]);
 
-    res.status(200).json({ message: "Biography updated successfully.", biography });
+    res
+      .status(200)
+      .json({ message: "Biography updated successfully.", biography });
   } catch (err) {
     console.error("Update Biography Error:", err.message);
     res.status(500).json({ message: "Server error" });

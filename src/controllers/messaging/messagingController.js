@@ -266,7 +266,7 @@ const sendMessage = async (req, res) => {
     const { conversationId, content, replyToMessageId, media_url, media_type } =
       req.body;
 
-    // (NEW) reject truly-empty messages
+    // reject truly-empty messages
     const trimmed = (content || "").trim();
     if (!trimmed && !media_url) {
       return res
@@ -340,15 +340,17 @@ const sendMessage = async (req, res) => {
 
     // full payload to room
     const fullMessage = {
-      message_id: message.message_id,
-      conversation_id: conversationId,
-      sender_id: user_id,
+      message_id: message.message_id, // ✅ snake_case
+      conversation_id: conversationId, // ✅ snake_case
+      sender_id: user_id, // ✅ snake_case
       username,
       avatar,
       content: message.content,
-      sent_at: message.sent_at,
-      media_url: message.media_url,
-      media_type: message.media_type,
+      sent_at: message.sent_at, // ✅ snake_case
+      delivered_at: message.delivered_at, // ✅ snake_case
+      read_by_count: message.read_by_count || 0,
+      media_url: message.media_url, // ✅ snake_case
+      media_type: message.media_type, // ✅ snake_case
       reply_to_message: replyToMessage || undefined,
     };
 
@@ -415,24 +417,27 @@ const getMessages = async (req, res) => {
   try {
     const values = [conversationId];
     let query = `
-      SELECT
-        m.message_id,
-        m.sender_id,
-        u.username,
-        u.profile_picture AS sender_avatar,
-        m.content,
-        m.sent_at,
-        m.reply_to_id,
-        m.media_url,
-        m.media_type,
-        r.content AS reply_to_content,
-        ru.username AS reply_to_username
-      FROM messages m
-      JOIN users u ON u.user_id = m.sender_id
-      LEFT JOIN messages r ON m.reply_to_id = r.message_id
-      LEFT JOIN users ru ON r.sender_id = ru.user_id
-      WHERE m.conversation_id = $1 AND m.is_deleted = false
-    `;
+  SELECT
+    m.message_id,
+    m.sender_id,
+    u.username,
+    u.profile_picture AS sender_avatar,
+    m.content,
+    m.sent_at,
+    m.delivered_at,
+    m.read_by_count,  -- ✅ THIS MUST BE SELECTED EXPLICITLY FROM m
+    m.reply_to_id,
+    m.media_url,
+    m.media_type,
+    r.message_id AS reply_message_id,  -- ✅ Alias to avoid collision
+    r.content AS reply_to_content,
+    ru.username AS reply_to_username
+  FROM messages m
+  JOIN users u ON u.user_id = m.sender_id
+  LEFT JOIN messages r ON m.reply_to_id = r.message_id
+  LEFT JOIN users ru ON r.sender_id = ru.user_id
+  WHERE m.conversation_id = $1 AND m.is_deleted = false
+`;
 
     if (before) {
       query += ` AND m.sent_at < (SELECT sent_at FROM messages WHERE message_id = $2)`;
@@ -487,6 +492,8 @@ const getMessages = async (req, res) => {
       avatar: msg.sender_avatar || null,
       content: msg.content,
       sent_at: msg.sent_at,
+      delivered_at: msg.delivered_at,
+      read_by_count: msg.read_by_count || 0, // ✅ Use the number directly
       reply_to_id: msg.reply_to_id,
       reply_to_message: msg.reply_to_id
         ? {

@@ -13,8 +13,8 @@ const sendMessage = async (
   mediaType = null
 ) => {
   const { rows } = await pool.query(
-    `INSERT INTO messages (conversation_id, sender_id, content, reply_to_id, media_url, media_type)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO messages (conversation_id, sender_id, content, reply_to_id, media_url, media_type, sent_at, delivered_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
      RETURNING *`,
     [conversationId, senderId, content, replyToId, mediaUrl, mediaType]
   );
