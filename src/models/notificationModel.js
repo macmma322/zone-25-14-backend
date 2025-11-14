@@ -13,6 +13,7 @@ const NotificationTypes = Object.freeze({
   ANNOUNCEMENT: "announcement",
   GIVEAWAY: "giveaway",
   DONATION: "donation",
+  MENTION: "mention",
 });
 
 module.exports = NotificationTypes;

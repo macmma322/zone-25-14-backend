@@ -10,6 +10,10 @@ const pool = require("./src/config/db.js");
 const { initSocket } = require("./src/config/socket.js");
 const loadMiddlewares = require("./src/config/loadMiddleware");
 const loadRoutes = require("./src/config/loadRoutes");
+const {
+  runStartupScripts,
+  scheduleMaintenanceTasks,
+} = require("./src/config/startupScripts");
 
 const app = express();
 const server = http.createServer(app);
@@ -55,7 +59,15 @@ pool
     }
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
-      console.log(`🚀 Server + Socket.IO running on port ${PORT}`);
+      console.log(`✅ Server running on port ${PORT}`);
+
+      // ✅ Run startup scripts (non-blocking)
+      runStartupScripts().catch((err) =>
+        console.error("Startup scripts error:", err)
+      );
+
+      // ✅ Schedule maintenance tasks
+      scheduleMaintenanceTasks();
     });
   })
   .catch((err) => {

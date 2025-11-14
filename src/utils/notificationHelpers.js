@@ -129,6 +129,8 @@ function getDefaultNotificationContent(type, data = {}) {
       return data.title
         ? `🔥 ${data.title}`
         : "You unlocked a new achievement!";
+    case "mention":
+      return `${sender} mentioned you in a comment.`;
 
     default:
       return "You have a new notification.";
@@ -224,6 +226,16 @@ function generateAdditionalInfo(type, data = {}) {
 
     case "achievement":
       return data.title ? `Unlocked: ${safeSnippet(data.title)}` : undefined;
+
+    case "mention": {
+      const { eventTitle, commentSnippet } = data;
+      if (commentSnippet) {
+        return `In ${eventTitle || "an event"}: "${safeSnippet(
+          commentSnippet
+        )}"`;
+      }
+      return eventTitle ? `In event: ${safeSnippet(eventTitle)}` : undefined;
+    }
 
     default:
       return undefined;

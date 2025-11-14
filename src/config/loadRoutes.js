@@ -229,7 +229,36 @@ module.exports = function loadRoutes(app) {
   );
 
   // ─────────────────────────────────────────────
+  // 📅 Events
+  // ─────────────────────────────────────────────
+
+  app.use(
+    "/api/events",
+    normalizeRouter(
+      require("../routes/events/eventCommentRoutes"),
+      "routes/events/eventCommentRoutes"
+    )
+  );
+
+  app.use(
+    "/api/events",
+    normalizeRouter(
+      require("../routes/events/eventUploadRoutes"),
+      "routes/events/eventUploadRoutes"
+    )
+  );
+
+  app.use(
+    "/api/events",
+    normalizeRouter(
+      require("../routes/events/eventRoutes"),
+      "routes/events/eventRoutes"
+    )
+  );
+
+  // ─────────────────────────────────────────────
   // 📂 Static Assets
   // ─────────────────────────────────────────────
   app.use("/uploads", express.static("uploads"));
 };
+// src/server.js or wherever you register routes
