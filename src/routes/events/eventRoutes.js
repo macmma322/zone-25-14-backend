@@ -166,6 +166,7 @@ router.patch(
   async (req, res) => {
     const { eventId } = req.params;
     const updateData = req.body;
+    console.log("Update data received:", updateData);
 
     try {
       // ✅ Get current event to access old image URLs

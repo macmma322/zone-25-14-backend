@@ -1,5 +1,5 @@
 // src/models/productModel.js
-// Enhanced product model with variations, images, categories, and stock management
+// FIXED: Changed is_primary to is_main to match database schema
 const pool = require("../config/db");
 
 /* ==================== PRODUCTS ==================== */
@@ -14,15 +14,16 @@ const getAllProducts = async (filters = {}) => {
         COALESCE(json_agg(DISTINCT jsonb_build_object(
           'image_id', pi.image_id,
           'image_url', pi.image_url,
-          'is_primary', pi.is_primary,
-          'display_order', pi.display_order
+          'is_main', pi.is_main,
+          'uploaded_at', pi.uploaded_at
         )) FILTER (WHERE pi.image_id IS NOT NULL), '[]') as images,
         COALESCE(json_agg(DISTINCT jsonb_build_object(
           'variation_id', pv.variation_id,
           'size', pv.size,
           'color', pv.color,
           'stock_quantity', pv.stock_quantity,
-          'sku', pv.sku
+          'additional_price', pv.additional_price,
+          'special_edition', pv.special_edition
         )) FILTER (WHERE pv.variation_id IS NOT NULL), '[]') as variations,
         COALESCE(json_agg(DISTINCT pc.category_id) FILTER (WHERE pc.category_id IS NOT NULL), '[]') as category_ids
       FROM products p
@@ -107,15 +108,15 @@ const getProductById = async (id) => {
         COALESCE(json_agg(DISTINCT jsonb_build_object(
           'image_id', pi.image_id,
           'image_url', pi.image_url,
-          'is_primary', pi.is_primary,
-          'display_order', pi.display_order
+          'is_main', pi.is_main,
+          'uploaded_at', pi.uploaded_at
         )) FILTER (WHERE pi.image_id IS NOT NULL), '[]') as images,
         COALESCE(json_agg(DISTINCT jsonb_build_object(
           'variation_id', pv.variation_id,
           'size', pv.size,
           'color', pv.color,
           'stock_quantity', pv.stock_quantity,
-          'sku', pv.sku,
+          'additional_price', pv.additional_price,
           'special_edition', pv.special_edition
         )) FILTER (WHERE pv.variation_id IS NOT NULL), '[]') as variations,
         COALESCE(json_agg(DISTINCT jsonb_build_object(
@@ -188,9 +189,13 @@ const createProduct = async (productData) => {
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
         await client.query(
-          `INSERT INTO product_images (product_id, image_url, is_primary, display_order)
-           VALUES ($1, $2, $3, $4)`,
-          [product.product_id, img.image_url, img.is_primary || i === 0, i]
+          `INSERT INTO product_images (product_id, image_url, is_main)
+           VALUES ($1, $2, $3)`,
+          [
+            product.product_id,
+            img.image_url,
+            img.is_primary || img.is_main || i === 0,
+          ]
         );
       }
     }
@@ -200,7 +205,7 @@ const createProduct = async (productData) => {
       for (const variation of variations) {
         await client.query(
           `INSERT INTO product_variations (
-            product_id, size, color, stock_quantity, sku, special_edition
+            product_id, size, color, stock_quantity, special_edition, additional_price
           )
           VALUES ($1, $2, $3, $4, $5, $6)`,
           [
@@ -208,8 +213,8 @@ const createProduct = async (productData) => {
             variation.size || null,
             variation.color || null,
             variation.stock_quantity || 0,
-            variation.sku || null,
             variation.special_edition || null,
+            variation.additional_price || 0,
           ]
         );
       }
@@ -270,8 +275,7 @@ const updateProductInDb = async (id, updateData) => {
         currency_code = COALESCE($4, currency_code),
         is_exclusive = COALESCE($5, is_exclusive),
         is_active = COALESCE($6, is_active),
-        exclusive_to_niche = COALESCE($7, exclusive_to_niche),
-        updated_at = CURRENT_TIMESTAMP
+        exclusive_to_niche = COALESCE($7, exclusive_to_niche)
       WHERE product_id = $8
       RETURNING *
     `;
@@ -296,9 +300,9 @@ const updateProductInDb = async (id, updateData) => {
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
         await client.query(
-          `INSERT INTO product_images (product_id, image_url, is_primary, display_order)
-           VALUES ($1, $2, $3, $4)`,
-          [id, img.image_url, img.is_primary || i === 0, i]
+          `INSERT INTO product_images (product_id, image_url, is_main)
+           VALUES ($1, $2, $3)`,
+          [id, img.image_url, img.is_primary || img.is_main || i === 0]
         );
       }
     }
@@ -311,14 +315,14 @@ const updateProductInDb = async (id, updateData) => {
           // Update existing
           await client.query(
             `UPDATE product_variations
-             SET size = $1, color = $2, stock_quantity = $3, sku = $4, special_edition = $5
+             SET size = $1, color = $2, stock_quantity = $3, special_edition = $4, additional_price = $5
              WHERE variation_id = $6 AND product_id = $7`,
             [
               variation.size,
               variation.color,
               variation.stock_quantity,
-              variation.sku,
               variation.special_edition,
+              variation.additional_price || 0,
               variation.variation_id,
               id,
             ]
@@ -327,7 +331,7 @@ const updateProductInDb = async (id, updateData) => {
           // Add new
           await client.query(
             `INSERT INTO product_variations (
-              product_id, size, color, stock_quantity, sku, special_edition
+              product_id, size, color, stock_quantity, special_edition, additional_price
             )
             VALUES ($1, $2, $3, $4, $5, $6)`,
             [
@@ -335,8 +339,8 @@ const updateProductInDb = async (id, updateData) => {
               variation.size,
               variation.color,
               variation.stock_quantity,
-              variation.sku,
               variation.special_edition,
+              variation.additional_price || 0,
             ]
           );
         }
@@ -377,7 +381,7 @@ const softDeleteProductInDb = async (id) => {
   try {
     const query = `
       UPDATE products
-      SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+      SET is_active = FALSE
       WHERE product_id = $1
       RETURNING *
     `;
@@ -406,6 +410,7 @@ const hardDeleteProductInDb = async (id) => {
     await client.query(`DELETE FROM product_categories WHERE product_id = $1`, [
       id,
     ]);
+    await client.query(`DELETE FROM product_tags WHERE product_id = $1`, [id]);
 
     const { rows } = await client.query(
       `DELETE FROM products WHERE product_id = $1 RETURNING *`,
